@@ -12,6 +12,7 @@ except ImportError:
 
 from core.data.loader import BivTattDatasetLoader, DatasetSplitter
 from core.runner import PipelineRunner
+from core.reduction_analyzer import ReductionAnalyzerRunner
 
 from core.extractors.cnn import ResNet50Extractor
 from core.extractors.vit import DINOv2Extractor
@@ -52,7 +53,7 @@ SEARCHERS = {
 }
 
 
-def create_dummy_dataset(output_dir="dummy_dataset", n_gallery=20, n_probe=5):
+def create_dummy_dataset(output_dir="data/dummy_dataset", n_gallery=20, n_probe=5):
     """Creates a dummy BivTatt dataset to test the pipelines."""
     os.makedirs(f"{output_dir}/images", exist_ok=True)
     
@@ -96,6 +97,19 @@ def run_tui():
     print("=" * 60)
     print(" 🔎 ForensTatt Core - Interactive Pipeline Builder")
     print("=" * 60)
+    
+    mode = questionary.select(
+        "Select the mode of operation:",
+        choices=[
+            "1. Full Pipeline Execution",
+            "2. Dimensionality Reduction Analysis"
+        ]
+    ).ask()
+    
+    if not mode:
+        return
+        
+    is_reduction_analysis = "2." in mode
 
     # 1. Dataset Selection
     dataset_source = questionary.select(
@@ -113,6 +127,7 @@ def run_tui():
     dataset_path = None
     gallery = []
     probe = []
+    dataset_full = []
     
     # 2. Partitioning
     start_str = questionary.text("Dataset partition start index (default 0):", validate=is_valid_int).ask()
@@ -133,6 +148,7 @@ def run_tui():
         else:
             dataset = dataset[start_idx:]
             
+        dataset_full = dataset
         splitter = DatasetSplitter()
         gallery, probe = splitter.split(dataset)
         print(f"Loaded {len(gallery)} gallery images and {len(probe)} probe images.")
@@ -144,6 +160,8 @@ def run_tui():
         elif "Kagglehub" in dataset_source:
             print("Resolving dataset via Kagglehub...")
             import kagglehub
+            # Change kagglehub cache directory to our data folder if possible
+            os.environ['KAGGLEHUB_CACHE'] = os.path.join(os.getcwd(), 'data', 'kagglehub')
             dataset_path = kagglehub.dataset_download("mexwell/bivtatt-dataset")
             if not os.path.exists(os.path.join(dataset_path, "images")):
                 subdirs = [os.path.join(dataset_path, d) for d in os.listdir(dataset_path) 
@@ -156,6 +174,7 @@ def run_tui():
         if dataset_path:
             loader = BivTattDatasetLoader(dataset_path)
             dataset = loader.load_dataset(start=start_idx, length=length_idx)
+            dataset_full = dataset
             splitter = DatasetSplitter()
             gallery, probe = splitter.split(dataset)
             print(f"Loaded {len(gallery)} gallery images and {len(probe)} probe images.")
@@ -174,14 +193,18 @@ def run_tui():
     reducer_choice = questionary.select("Select Dimensionality Reducer:", choices=list(REDUCERS.keys())).ask()
     if not reducer_choice: return
     
-    clusterer_choice = questionary.select("Select Clusterer:", choices=list(CLUSTERERS.keys())).ask()
-    if not clusterer_choice: return
+    clusterer_choice = None
+    searcher_choice = None
     
-    searcher_choice = questionary.select("Select Index Searcher:", choices=list(SEARCHERS.keys())).ask()
-    if not searcher_choice: return
+    if not is_reduction_analysis:
+        clusterer_choice = questionary.select("Select Clusterer:", choices=list(CLUSTERERS.keys())).ask()
+        if not clusterer_choice: return
+        
+        searcher_choice = questionary.select("Select Index Searcher:", choices=list(SEARCHERS.keys())).ask()
+        if not searcher_choice: return
 
     # 4. Confirmation
-    confirm = questionary.confirm("Execute the pipeline?").ask()
+    confirm = questionary.confirm("Execute?").ask()
     if not confirm:
         return
 
@@ -200,24 +223,40 @@ def run_tui():
     else:
         reducer = REDUCERS[reducer_choice]()
 
-    # Clusterers dynamic setup
-    if clusterer_choice == "MiniBatchKMeans":
-        clusterer = CLUSTERERS[clusterer_choice](n_clusters=8, metric='euclidean')
-    elif clusterer_choice == "HDBSCAN":
-        clusterer = CLUSTERERS[clusterer_choice](min_cluster_size=max(2, min(5, len(gallery)//2)), metric='euclidean')
-    elif clusterer_choice == "Louvain":
-        clusterer = CLUSTERERS[clusterer_choice](n_neighbors=5, metric='cosine')
+    if is_reduction_analysis:
+        output_json = f"results/reduction-analysis/reduction_{uuid.uuid4().hex[:8]}.json"
+        print("\n[+] Running Reduction Analysis...")
+        runner = ReductionAnalyzerRunner(extractor, reducer)
+        # We can use the gallery to test reduction or the full dataset. Full is better to see variance.
+        out = runner.run(dataset_full, output_json=output_json)
+        
+        print(f"\n[+] Execution finished! Results saved to {output_json}")
+        print("-" * 40)
+        print(f"Information Retained: {out['information_retained_percent']:.2f}%")
+        print(f"Information Lost:     {out['information_lost_percent']:.2f}%")
+        if 'explained_variance_percent' in out:
+            print(f"Explained Variance:   {out['explained_variance_percent']:.2f}%")
+        print("-" * 40)
+        
+    else:
+        # Clusterers dynamic setup
+        if clusterer_choice == "MiniBatchKMeans":
+            clusterer = CLUSTERERS[clusterer_choice](n_clusters=8, metric='euclidean')
+        elif clusterer_choice == "HDBSCAN":
+            clusterer = CLUSTERERS[clusterer_choice](min_cluster_size=max(2, min(5, len(gallery)//2)), metric='euclidean')
+        elif clusterer_choice == "Louvain":
+            clusterer = CLUSTERERS[clusterer_choice](n_neighbors=5, metric='cosine')
 
-    searcher = SEARCHERS[searcher_choice]()
+        searcher = SEARCHERS[searcher_choice]()
 
-    output_csv = f"results/tui_pipeline_{uuid.uuid4().hex[:8]}.csv"
+        output_csv = f"results/pipelines/tui_pipeline_{uuid.uuid4().hex[:8]}.csv"
 
-    print("\n[+] Running pipeline...")
-    runner = PipelineRunner(extractor, reducer, clusterer, searcher)
-    out = runner.run(gallery, probe, output_csv=output_csv, file_exists_action="overwrite")
-    
-    print(f"\n[+] Execution finished! Results saved to {output_csv}")
-    print(f"    Timers: {out['timers']}")
+        print("\n[+] Running pipeline...")
+        runner = PipelineRunner(extractor, reducer, clusterer, searcher)
+        out = runner.run(gallery, probe, output_csv=output_csv, file_exists_action="overwrite")
+        
+        print(f"\n[+] Execution finished! Results saved to {output_csv}")
+        print(f"    Timers: {out['timers']}")
 
 if __name__ == "__main__":
     run_tui()

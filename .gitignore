@@ -5,7 +5,6 @@ build/
 dist/
 wheels/
 *.egg-info
-dummy_dataset/
 
 # Virtual environments
 .venv/
@@ -13,7 +12,15 @@ dummy_dataset/
 # Environment files
 .env
 
-# Runtime outputs and generated test data
-results/
-dummy_dataset/
+# Data directory
+data/*
+!data/.keep
 
+# Results directory
+results/*
+!results/pipelines/
+!results/reduction-analysis/
+results/pipelines/*
+!results/pipelines/.keep
+results/reduction-analysis/*
+!results/reduction-analysis/.keep
