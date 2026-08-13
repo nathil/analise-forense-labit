@@ -12,9 +12,12 @@ class ResNet50Extractor(FeatureExtractor):
     Extracts features using a pre-trained ResNet50 model.
     Removes the final classification layer to return the 2048-d feature vector.
     """
-    def __init__(self, use_l2_norm: bool = True):
+    def __init__(self, use_l2_norm: bool = True, device: str = None):
         self.use_l2_norm = use_l2_norm
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(device)
         
         # Load pre-trained model and remove fully connected layer
         model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)

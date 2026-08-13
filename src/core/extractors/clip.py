@@ -11,8 +11,11 @@ class CLIPExtractor(FeatureExtractor):
     Extracts features using OpenAI's CLIP model (vision encoder).
     These vectors naturally align with cosine similarity metrics.
     """
-    def __init__(self, model_name: str = "openai/clip-vit-base-patch32"):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(self, model_name: str = "openai/clip-vit-base-patch32", device: str = None):
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(device)
         
         self.model = CLIPModel.from_pretrained(model_name).to(self.device)
         self.processor = CLIPProcessor.from_pretrained(model_name)

@@ -11,8 +11,11 @@ class DINOv2Extractor(FeatureExtractor):
     Extracts features using Facebook's DINOv2 ViT model.
     Captures advanced local and semantic properties of tattoo textures.
     """
-    def __init__(self, model_name: str = "facebook/dinov2-base"):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(self, model_name: str = "facebook/dinov2-base", device: str = None):
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(device)
         
         self.processor = AutoImageProcessor.from_pretrained(model_name)
         self.model = AutoModel.from_pretrained(model_name).to(self.device)
