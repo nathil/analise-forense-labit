@@ -26,6 +26,13 @@ class CLIPExtractor(FeatureExtractor):
         outputs = self.model.get_image_features(**inputs)
         
         # Features are already L2 normalized by default in CLIP inference, but we ensure it's standard
-        features = outputs.squeeze().cpu().numpy()
-        
+        if isinstance(outputs, torch.Tensor):
+            features = outputs.squeeze().cpu().numpy()
+        elif hasattr(outputs, 'image_embeds'):
+            features = outputs.image_embeds.squeeze().cpu().numpy()
+        elif hasattr(outputs, 'pooler_output'):
+            features = outputs.pooler_output.squeeze().cpu().numpy()
+        else:
+            features = outputs[0].squeeze().cpu().numpy()
+            
         return features
