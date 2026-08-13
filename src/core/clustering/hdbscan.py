@@ -9,10 +9,11 @@ class HDBSCANClusterer(Clusterer):
     Note: HDBSCAN does not have standard cluster centers like KMeans,
     so we calculate the mean of the points in each cluster as the centroid.
     """
-    def __init__(self, min_cluster_size: int = 5, metric: str = 'euclidean'):
+    def __init__(self, min_cluster_size: int = 5, metric: str = 'euclidean', copy: bool = True):
         self.min_cluster_size = min_cluster_size
         self.metric = metric
-        self.model = HDBSCAN(min_cluster_size=min_cluster_size, metric=metric)
+        self.copy = copy
+        self.model = HDBSCAN(min_cluster_size=min_cluster_size, metric=metric, copy=copy)
         self._cluster_centers = None
         self.labels_ = None
         
