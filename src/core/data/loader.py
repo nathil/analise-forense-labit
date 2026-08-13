@@ -20,13 +20,18 @@ class BivTattDatasetLoader:
         if not self.images_dir.exists():
             raise FileNotFoundError(f"Images directory not found at {self.images_dir}")
 
-    def load_dataset(self) -> List[Dict]:
+    def load_dataset(self, start: int = 0, length: int = None) -> List[Dict]:
         """
         Scans the directory and builds a list of dictionaries containing
         metadata for each image.
         """
         dataset = []
-        for file_path in self.images_dir.glob("*.jpg"):
+        files = list(self.images_dir.glob("*.jpg"))
+        
+        # Sort files to ensure deterministic partitioning
+        files.sort(key=lambda x: x.name)
+        
+        for file_path in files:
             filename = file_path.stem
             parts = filename.split("_")
             
@@ -50,7 +55,9 @@ class BivTattDatasetLoader:
                 "filename": file_path.name
             })
             
-        return dataset
+        if length is not None:
+            return dataset[start:start+length]
+        return dataset[start:]
 
 class DatasetSplitter:
     """
