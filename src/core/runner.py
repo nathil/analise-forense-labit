@@ -116,7 +116,64 @@ class PipelineRunner:
         else:
             df.to_csv(output_csv, mode='w', header=True, index=False)
             
+        # 7. Compute Confusion Matrix metrics and save JSON
+        import json
+        total_tp = 0
+        total_fp = 0
+        total_fn = 0
+        total_tn = 0
+        
+        # Pre-count gallery labels
+        gallery_label_counts = {}
+        for g in gallery:
+            lbl = g['label']
+            gallery_label_counts[lbl] = gallery_label_counts.get(lbl, 0) + 1
+            
+        gallery_size = len(gallery)
+        
+        for p_item in probe:
+            p_label = p_item['label']
+            relevant_in_gallery = gallery_label_counts.get(p_label, 0)
+            
+            p_results = [r for r in results if r['probe_image'] == p_item['filename']]
+            retrieved_relevant = sum(1 for r in p_results if r['is_correct'])
+            retrieved_total = len(p_results)
+            
+            tp = retrieved_relevant
+            fp = retrieved_total - retrieved_relevant
+            fn = relevant_in_gallery - retrieved_relevant
+            tn = (gallery_size - relevant_in_gallery) - fp
+            
+            total_tp += tp
+            total_fp += fp
+            total_fn += fn
+            total_tn += tn
+            
+        json_path = os.path.splitext(output_csv)[0] + ".json"
+        
+        metrics_data = {
+            "csv_file": os.path.basename(output_csv),
+            "pipeline_components": {
+                "extractor": self.extractor.__class__.__name__,
+                "reducer": self.reducer.__class__.__name__,
+                "clusterer": self.clusterer.__class__.__name__,
+                "index_searcher": self.index_searcher.__class__.__name__
+            },
+            "confusion_matrix": {
+                "tp": total_tp,
+                "fp": total_fp,
+                "fn": total_fn,
+                "tn": total_tn
+            },
+            "timers": timers,
+            "top_k": top_k
+        }
+        
+        with open(json_path, 'w') as f:
+            json.dump(metrics_data, f, indent=4)
+            
         return {
             "timers": timers,
-            "results": results
+            "results": results,
+            "metrics": metrics_data
         }
