@@ -131,11 +131,17 @@ class PipelineRunner:
             
         gallery_size = len(gallery)
         
+        top1_correct = 0
+        topk_correct = 0
+        ap_sum = 0.0
+        
         for p_item in probe:
             p_label = p_item['label']
             relevant_in_gallery = gallery_label_counts.get(p_label, 0)
             
             p_results = [r for r in results if r['probe_image'] == p_item['filename']]
+            p_results.sort(key=lambda x: x['match_rank'])
+            
             retrieved_relevant = sum(1 for r in p_results if r['is_correct'])
             retrieved_total = len(p_results)
             
@@ -149,6 +155,22 @@ class PipelineRunner:
             total_fn += fn
             total_tn += tn
             
+            # IR Metrics per query
+            if p_results and p_results[0]['is_correct']:
+                top1_correct += 1
+            if retrieved_relevant > 0:
+                topk_correct += 1
+                
+            hits = 0
+            sum_precisions = 0.0
+            for i, r in enumerate(p_results, start=1):
+                if r['is_correct']:
+                    hits += 1
+                    sum_precisions += hits / i
+                    
+            if relevant_in_gallery > 0:
+                ap_sum += sum_precisions / relevant_in_gallery
+                
         json_path = os.path.splitext(output_csv)[0] + ".json"
         
         # Calculate derived metrics
@@ -156,6 +178,11 @@ class PipelineRunner:
         recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
         f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
         accuracy = (total_tp + total_tn) / (total_tp + total_fp + total_fn + total_tn) if (total_tp + total_fp + total_fn + total_tn) > 0 else 0.0
+        
+        num_probes = len(probe)
+        top1_accuracy = top1_correct / num_probes if num_probes > 0 else 0.0
+        topk_accuracy = topk_correct / num_probes if num_probes > 0 else 0.0
+        mAP = ap_sum / num_probes if num_probes > 0 else 0.0
         
         metrics_data = {
             "csv_file": os.path.basename(output_csv),
@@ -175,7 +202,10 @@ class PipelineRunner:
                 "accuracy": accuracy,
                 "precision": precision,
                 "recall": recall,
-                "f1_score": f1_score
+                "f1_score": f1_score,
+                "top1_accuracy": top1_accuracy,
+                f"top{top_k}_accuracy": topk_accuracy,
+                "mAP": mAP
             },
             "timers": timers,
             "top_k": top_k
