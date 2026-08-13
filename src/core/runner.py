@@ -151,6 +151,12 @@ class PipelineRunner:
             
         json_path = os.path.splitext(output_csv)[0] + ".json"
         
+        # Calculate derived metrics
+        precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
+        recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
+        f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+        accuracy = (total_tp + total_tn) / (total_tp + total_fp + total_fn + total_tn) if (total_tp + total_fp + total_fn + total_tn) > 0 else 0.0
+        
         metrics_data = {
             "csv_file": os.path.basename(output_csv),
             "pipeline_components": {
@@ -164,6 +170,12 @@ class PipelineRunner:
                 "fp": total_fp,
                 "fn": total_fn,
                 "tn": total_tn
+            },
+            "performance_metrics": {
+                "accuracy": accuracy,
+                "precision": precision,
+                "recall": recall,
+                "f1_score": f1_score
             },
             "timers": timers,
             "top_k": top_k
