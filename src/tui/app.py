@@ -101,8 +101,8 @@ def run_tui():
     dataset_source = questionary.select(
         "Select the dataset source:",
         choices=[
-            "Dummy Dataset (Generated for fast testing)",
             "Kagglehub (mexwell/bivtatt-dataset)",
+            "Dummy Dataset (Generated for fast testing)",
             "Local Directory"
         ]
     ).ask()
