@@ -4,9 +4,15 @@ __pycache__/
 build/
 dist/
 wheels/
-results/
 *.egg-info
 
 # Virtual environments
-.venv
-\n# Environments\n.env\nresults/\n.venv/
+.venv/
+
+# Environment files
+.env
+
+# Runtime outputs and generated test data
+results/
+dummy_dataset/
+
