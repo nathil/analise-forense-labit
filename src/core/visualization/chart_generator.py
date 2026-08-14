@@ -28,9 +28,41 @@ class ChartGenerator:
         # Radar chart if performance metrics exist (i.e. full pipeline, not just reduction analyzer)
         if "performance_metrics" in meta:
             self._plot_metrics_radar(meta, test_name)
+            self._plot_confusion_matrix(meta, test_name)
             
         print(f"    Charts saved to {self.output_dir}")
             
+    def _plot_confusion_matrix(self, meta: dict, test_name: str):
+        cm = meta.get("confusion_matrix", {})
+        if not cm:
+            return
+            
+        tp = cm.get("tp", 0)
+        fp = cm.get("fp", 0)
+        fn = cm.get("fn", 0)
+        tn = cm.get("tn", 0)
+        
+        # 2x2 matrix: [[TP, FP], [FN, TN]]
+        # In standard layout it is often: 
+        # Predicted Positive, Predicted Negative
+        # Actual Positive [ TP, FN ]
+        # Actual Negative [ FP, TN ]
+        matrix = np.array([[tp, fn], [fp, tn]])
+        
+        plt.figure(figsize=(7, 5))
+        # Use a logarithmic color scale because TN is usually massive compared to others
+        import matplotlib.colors as mcolors
+        norm = mcolors.LogNorm(vmin=1, vmax=matrix.max() + 1)
+        
+        sns.heatmap(matrix, annot=True, fmt='d', cmap='Blues', norm=norm,
+                    xticklabels=['Predicted Match', 'Predicted Mismatch'],
+                    yticklabels=['Actual Match', 'Actual Mismatch'])
+                    
+        plt.title(f"Confusion Matrix - {test_name}", fontsize=14)
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.output_dir, f"{test_name}_confusion_matrix.png"), dpi=150)
+        plt.close()
+
     def _plot_cmc_curve(self, df: pd.DataFrame, test_name: str, top_k: int):
         cmc_scores = []
         ranks = list(range(1, top_k + 1))
