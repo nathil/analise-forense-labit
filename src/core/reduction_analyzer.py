@@ -31,11 +31,12 @@ class ReductionAnalyzerRunner:
         vector = self.extractor.extract(img)
         return vector
 
-    def run(self, dataset: List[Dict], output_json: str) -> Dict[str, Any]:
+    def run(self, dataset: List[Dict], test_name: str, output_dir: str = "results/reduction-analysis") -> Dict[str, Any]:
         """
         Executes extraction, reduction and calculates information retention metrics.
         """
         timers = {}
+        output_json = os.path.join(output_dir, f"{test_name}.json")
         
         # 1. Feature Extraction
         t0 = time.time()
@@ -76,6 +77,7 @@ class ReductionAnalyzerRunner:
         timers['metrics_calculation'] = time.time() - t0
         
         metrics = {
+            "test_name": test_name,
             "components": {
                 "extractor": self.extractor.__class__.__name__,
                 "reducer": self.reducer.__class__.__name__

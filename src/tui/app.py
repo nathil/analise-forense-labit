@@ -3,6 +3,7 @@ import uuid
 import sys
 import cv2
 import numpy as np
+from datetime import datetime
 
 try:
     import questionary
@@ -203,6 +204,24 @@ def run_tui():
         searcher_choice = questionary.select("Select Index Searcher:", choices=list(SEARCHERS.keys())).ask()
         if not searcher_choice: return
 
+    # Generate default name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if is_reduction_analysis:
+        default_name = f"{timestamp}_{extractor_choice}_{reducer_choice}"
+    else:
+        s_choice = searcher_choice.split(" ")[0] if searcher_choice else "Searcher"
+        default_name = f"{timestamp}_{extractor_choice}_{reducer_choice}_{clusterer_choice}_{s_choice}"
+
+    test_name_input = questionary.text(
+        f"Enter a name for this run (leave blank to use: {default_name}):"
+    ).ask()
+    
+    if test_name_input is None: return
+    
+    test_name = test_name_input.strip()
+    if not test_name:
+        test_name = default_name
+
     # 4. Confirmation
     confirm = questionary.confirm("Execute?").ask()
     if not confirm:
@@ -224,12 +243,12 @@ def run_tui():
         reducer = REDUCERS[reducer_choice]()
 
     if is_reduction_analysis:
-        output_json = f"results/reduction-analysis/reduction_{uuid.uuid4().hex[:8]}.json"
         print("\n[+] Running Reduction Analysis...")
         runner = ReductionAnalyzerRunner(extractor, reducer)
         # We can use the gallery to test reduction or the full dataset. Full is better to see variance.
-        out = runner.run(dataset_full, output_json=output_json)
+        out = runner.run(dataset_full, test_name=test_name)
         
+        output_json = os.path.join("results/reduction-analysis", f"{test_name}.json")
         print(f"\n[+] Execution finished! Results saved to {output_json}")
         print("-" * 40)
         print(f"Information Retained: {out['information_retained_percent']:.2f}%")
@@ -249,19 +268,17 @@ def run_tui():
 
         searcher = SEARCHERS[searcher_choice]()
 
-        output_csv = f"results/pipelines/tui_pipeline_{uuid.uuid4().hex[:8]}.csv"
-
         print("\n[+] Running pipeline...")
         runner = PipelineRunner(extractor, reducer, clusterer, searcher)
-        out = runner.run(gallery, probe, output_csv=output_csv, file_exists_action="overwrite")
+        out = runner.run(gallery, probe, test_name=test_name, file_exists_action="overwrite")
         
+        output_csv = os.path.join("results/pipelines", f"{test_name}.csv")
         print(f"\n[+] Execution finished! Results saved to {output_csv}")
         print(f"    Timers: {out['timers']}")
         
         from core.visualization.chart_generator import ChartGenerator
         chart_gen = ChartGenerator(output_dir="results/charts")
-        test_name = os.path.splitext(os.path.basename(output_csv))[0]
-        json_path = os.path.splitext(output_csv)[0] + ".json"
+        json_path = os.path.join("results/pipelines", f"{test_name}.json")
         chart_gen.generate_all_charts(output_csv, json_path, test_name)
 
 if __name__ == "__main__":

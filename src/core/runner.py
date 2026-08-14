@@ -44,14 +44,17 @@ class PipelineRunner:
         return vector
 
     def run(self, gallery: List[Dict], probe: List[Dict], 
-            output_csv: str = "results/output.csv", 
+            test_name: str,
+            output_dir: str = "results/pipelines", 
             file_exists_action: str = "append",
             top_k: int = 5) -> Dict[str, Any]:
         """
-        Executes the full pipeline and writes results to CSV.
+        Executes the full pipeline and writes results to CSV and JSON.
         file_exists_action can be 'append' or 'overwrite'.
         """
         timers = {}
+        output_csv = os.path.join(output_dir, f"{test_name}.csv")
+        json_path = os.path.join(output_dir, f"{test_name}.json")
         
         # 1. Feature Extraction (Gallery)
         t0 = time.time()
@@ -171,8 +174,6 @@ class PipelineRunner:
             if relevant_in_gallery > 0:
                 ap_sum += sum_precisions / relevant_in_gallery
                 
-        json_path = os.path.splitext(output_csv)[0] + ".json"
-        
         # Calculate derived metrics
         precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
         recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
@@ -185,6 +186,7 @@ class PipelineRunner:
         mAP = ap_sum / num_probes if num_probes > 0 else 0.0
         
         metrics_data = {
+            "test_name": test_name,
             "csv_file": os.path.basename(output_csv),
             "pipeline_components": {
                 "extractor": self.extractor.__class__.__name__,
