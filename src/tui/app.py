@@ -15,8 +15,8 @@ from core.data.loader import BivTattDatasetLoader, DatasetSplitter
 from core.runner import PipelineRunner
 from core.reduction_analyzer import ReductionAnalyzerRunner
 
-from core.extractors.cnn import ResNet50Extractor
-from core.extractors.vit import DINOv2Extractor
+from core.extractors.cnn import ResNet50Extractor, EfficientNetExtractor
+from core.extractors.vit import DINOv2Extractor, ViTExtractor
 from core.extractors.clip import CLIPExtractor
 
 from core.reducers.pca import PCAReducer, SVDReducer
@@ -31,6 +31,8 @@ from core.index.searcher import IndexSearcher
 
 EXTRACTORS = {
     "ResNet50": ResNet50Extractor,
+    "EfficientNet": EfficientNetExtractor,
+    "ViT": ViTExtractor,
     "DINOv2": DINOv2Extractor,
     "CLIP": CLIPExtractor
 }
@@ -103,14 +105,45 @@ def run_tui():
         "Select the mode of operation:",
         choices=[
             "1. Full Pipeline Execution",
-            "2. Dimensionality Reduction Analysis"
+            "2. Single Query Execution",
+            "3. Dimensionality Reduction Analysis",
+            "4. Clear Results & Data"
         ]
     ).ask()
     
     if not mode:
         return
         
-    is_reduction_analysis = "2." in mode
+    if "4." in mode:
+        from core.cleaner import WorkspaceCleaner
+        targets = questionary.checkbox(
+            "Select which folders to clear:",
+            choices=[
+                "data",
+                "pipelines",
+                "reduction-analysis",
+                "charts",
+                "multiple-pipelines",
+                "pipeline"
+            ]
+        ).ask()
+        
+        if not targets:
+            return
+            
+        confirm = questionary.confirm(
+            f"WARNING: This will permanently delete files in: {', '.join(targets)}. Are you sure?",
+            default=False
+        ).ask()
+        
+        if confirm:
+            WorkspaceCleaner.clean(targets)
+        else:
+            print("Operation cancelled.")
+        return
+        
+    is_reduction_analysis = "3." in mode
+    is_single_query = "2." in mode
 
     # 1. Dataset Selection
     dataset_source = questionary.select(
@@ -190,104 +223,198 @@ def run_tui():
         print("Partition does not have enough gallery/probe splits. Exiting.")
         return
 
-    # 4. Component Selection
+    # 2.5 Single Query Parameters
+    probe_index = None
+    top_k = 5
+    if is_single_query:
+        if len(probe) == 0:
+            print("Error: No probe images loaded. Cannot run Single Query.")
+            return
+        while True:
+            idx_str = questionary.text(f"Select a probe image index to use as the single query (0 to {len(probe)-1}):", default="0").ask()
+            if not idx_str: return
+            try:
+                probe_index = int(idx_str)
+                if 0 <= probe_index < len(probe):
+                    break
+                else:
+                    print(f"Index out of range. Please enter a value between 0 and {len(probe)-1}.")
+            except ValueError:
+                print("Invalid input. Please enter an integer.")
+                
+        while True:
+            k_str = questionary.text("Enter Top-K results to retrieve (default 5):", default="5").ask()
+            if not k_str: return
+            try:
+                top_k = int(k_str)
+                if top_k > 0: break
+            except ValueError:
+                print("Invalid input.")
 
-
+    # 3. Component Selection
     device = questionary.select("Select computation device:", choices=["cuda", "cpu"]).ask()
     if not device: return
     
-    extractor_choice = questionary.select("Select Feature Extractor:", choices=list(EXTRACTORS.keys())).ask()
-    if not extractor_choice: return
+    pipelines_to_run = []
     
-    reducer_choice = questionary.select("Select Dimensionality Reducer:", choices=list(REDUCERS.keys())).ask()
-    if not reducer_choice: return
-    
-    clusterer_choice = None
-    searcher_choice = None
-    
-    if not is_reduction_analysis:
-        clusterer_choice = questionary.select("Select Clusterer:", choices=list(CLUSTERERS.keys())).ask()
-        if not clusterer_choice: return
-        
-        searcher_choice = questionary.select("Select Index Searcher:", choices=list(SEARCHERS.keys())).ask()
-        if not searcher_choice: return
-
-    # Generate default name
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if is_reduction_analysis:
+        extractor_choice = questionary.select("Select Feature Extractor:", choices=list(EXTRACTORS.keys())).ask()
+        if not extractor_choice: return
+        reducer_choice = questionary.select("Select Dimensionality Reducer:", choices=list(REDUCERS.keys())).ask()
+        if not reducer_choice: return
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_name = f"{timestamp}_{extractor_choice}_{reducer_choice}"
+        test_name_input = questionary.text(f"Enter a name for this run (leave blank to use: {default_name}):").ask()
+        if test_name_input is None: return
+        test_name = test_name_input.strip() or default_name
+        
+        pipelines_to_run.append({
+            "extractor": extractor_choice,
+            "reducer": reducer_choice,
+            "test_name": test_name
+        })
     else:
-        s_choice = searcher_choice.split(" ")[0] if searcher_choice else "Searcher"
-        default_name = f"{timestamp}_{extractor_choice}_{reducer_choice}_{clusterer_choice}_{s_choice}"
+        while True:
+            extractor_choice = questionary.select("Select Feature Extractor:", choices=list(EXTRACTORS.keys())).ask()
+            if not extractor_choice: return
+            reducer_choice = questionary.select("Select Dimensionality Reducer:", choices=list(REDUCERS.keys())).ask()
+            if not reducer_choice: return
+            clusterer_choice = questionary.select("Select Clusterer:", choices=list(CLUSTERERS.keys())).ask()
+            if not clusterer_choice: return
+            searcher_choice = questionary.select("Select Index Searcher:", choices=list(SEARCHERS.keys())).ask()
+            if not searcher_choice: return
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            s_choice = searcher_choice.split(" ")[0] if searcher_choice else "Searcher"
+            default_name = f"{timestamp}_{extractor_choice}_{reducer_choice}_{clusterer_choice}_{s_choice}"
+            test_name_input = questionary.text(f"Enter a name for this run (leave blank to use: {default_name}):").ask()
+            if test_name_input is None: return
+            test_name = test_name_input.strip() or default_name
+            
+            pipelines_to_run.append({
+                "extractor": extractor_choice,
+                "reducer": reducer_choice,
+                "clusterer": clusterer_choice,
+                "searcher": searcher_choice,
+                "test_name": test_name
+            })
+            
+            add_more = questionary.confirm("Add another pipeline to compare?").ask()
+            if not add_more:
+                break
+                
+    batch_name = None
+    if not is_reduction_analysis and len(pipelines_to_run) > 1:
+        default_batch = f"Batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        batch_input = questionary.text(f"Enter a name for this comparative batch (leave blank to use: {default_batch}):").ask()
+        if batch_input is None: return
+        batch_name = batch_input.strip() or default_batch
+    elif is_single_query and len(pipelines_to_run) == 1:
+        batch_name = pipelines_to_run[0]["test_name"]
 
-    test_name_input = questionary.text(
-        f"Enter a name for this run (leave blank to use: {default_name}):"
-    ).ask()
-    
-    if test_name_input is None: return
-    
-    test_name = test_name_input.strip()
-    if not test_name:
-        test_name = default_name
-
-    # 4. Confirmation
+    # 5. Confirmation
     confirm = questionary.confirm("Execute?").ask()
     if not confirm:
         return
 
-    print("\n[+] Building components...")
-    if extractor_choice == "ResNet50":
-        extractor = EXTRACTORS[extractor_choice](use_l2_norm=False, device=device)
-    else:
-        extractor = EXTRACTORS[extractor_choice](device=device)
+    print(f"\n[+] Executing {len(pipelines_to_run)} pipeline(s)...")
     
-    # Reducers dynamic setup
-    red_k = min(128, max(1, len(gallery) - 2))
-    if reducer_choice in ["PCA", "SVD"]:
-        reducer = REDUCERS[reducer_choice](n_components=red_k)
-    elif reducer_choice == "UMAP":
-        reducer = REDUCERS[reducer_choice](n_components=red_k, metric='euclidean', n_neighbors=15)
-    else:
-        reducer = REDUCERS[reducer_choice]()
+    csv_paths = []
+    json_paths = []
+    test_names = []
+    from core.visualization.chart_generator import ChartGenerator
+    chart_gen = ChartGenerator(output_dir="results/charts")
+    
+    for i, p_config in enumerate(pipelines_to_run):
+        t_name = p_config["test_name"]
+        print(f"\n[{i+1}/{len(pipelines_to_run)}] Building components for {t_name}...")
+        
+        if p_config["extractor"] == "ResNet50":
+            extractor = EXTRACTORS[p_config["extractor"]](use_l2_norm=False, device=device)
+        else:
+            extractor = EXTRACTORS[p_config["extractor"]](device=device)
+        
+        red_k = min(128, max(1, len(gallery) - 2))
+        if p_config["reducer"] in ["PCA", "SVD"]:
+            reducer = REDUCERS[p_config["reducer"]](n_components=red_k)
+        elif p_config["reducer"] == "UMAP":
+            reducer = REDUCERS[p_config["reducer"]](n_components=red_k, metric='euclidean', n_neighbors=15)
+        else:
+            reducer = REDUCERS[p_config["reducer"]]()
 
-    if is_reduction_analysis:
-        print("\n[+] Running Reduction Analysis...")
-        runner = ReductionAnalyzerRunner(extractor, reducer)
-        # We can use the gallery to test reduction or the full dataset. Full is better to see variance.
-        out = runner.run(dataset_full, test_name=test_name)
+        if is_reduction_analysis:
+            print(f"\n[+] Running Reduction Analysis ({t_name})...")
+            runner = ReductionAnalyzerRunner(extractor, reducer)
+            out = runner.run(dataset_full, test_name=t_name)
+            
+            output_json = os.path.join("results/reduction-analysis", f"{t_name}.json")
+            print(f"\n[+] Execution finished! Results saved to {output_json}")
+            print("-" * 40)
+            print(f"Information Retained: {out['information_retained_percent']:.2f}%")
+            print(f"Information Lost:     {out['information_lost_percent']:.2f}%")
+            if 'explained_variance_percent' in out:
+                print(f"Explained Variance:   {out['explained_variance_percent']:.2f}%")
+            print("-" * 40)
+            
+        else:
+            if p_config["clusterer"] == "MiniBatchKMeans":
+                clusterer = CLUSTERERS[p_config["clusterer"]](n_clusters=8, metric='euclidean')
+            elif p_config["clusterer"] == "HDBSCAN":
+                clusterer = CLUSTERERS[p_config["clusterer"]](min_cluster_size=max(2, min(5, len(gallery)//2)), metric='euclidean')
+            elif p_config["clusterer"] == "Louvain":
+                clusterer = CLUSTERERS[p_config["clusterer"]](n_neighbors=5, metric='cosine')
+    
+            searcher = SEARCHERS[p_config["searcher"]]()
+    
+            runner = PipelineRunner(extractor, reducer, clusterer, searcher)
+            if is_single_query:
+                print(f"\n[+] Running Single Query pipeline ({t_name})...")
+                out = runner.run_single_query(gallery, probe[probe_index], top_k=top_k)
+                
+                if 'query_info' not in locals():
+                    query_info = {
+                        "query_image": out["query_image"],
+                        "query_image_path": out["query_image_path"],
+                        "query_label": out["query_label"]
+                    }
+                    pipeline_results_dict = {}
+                    
+                pipeline_results_dict[t_name] = out["results"]
+                print(f"    Execution finished for {t_name}. Results captured.")
+                
+            else:
+                print(f"\n[+] Running pipeline ({t_name})...")
+                out_csv = os.path.join("results/pipelines", f"{t_name}.csv")
+                out_json = os.path.join("results/pipelines", f"{t_name}.json")
+                
+                out = runner.run(gallery, probe, test_name=t_name)
+                
+                print(f"\n[+] Execution finished! Results saved to {out_csv}")
+                print(f"    Timers: {out['timers']}")
+                
+                chart_gen.generate_all_charts(out_csv, out_json, t_name)
+                
+                csv_paths.append(out_csv)
+                json_paths.append(out_json)
+                test_names.append(t_name)
+            
+    if is_single_query and pipelines_to_run:
+        import json
+        unified_json_path = os.path.join("results", "query", f"{batch_name}.json")
+        with open(unified_json_path, "w") as f:
+            json.dump({
+                "query_info": query_info,
+                "pipeline_results": pipeline_results_dict
+            }, f, indent=4)
+        print(f"\n[+] Saved unified query results to {unified_json_path}")
         
-        output_json = os.path.join("results/reduction-analysis", f"{test_name}.json")
-        print(f"\n[+] Execution finished! Results saved to {output_json}")
-        print("-" * 40)
-        print(f"Information Retained: {out['information_retained_percent']:.2f}%")
-        print(f"Information Lost:     {out['information_lost_percent']:.2f}%")
-        if 'explained_variance_percent' in out:
-            print(f"Explained Variance:   {out['explained_variance_percent']:.2f}%")
-        print("-" * 40)
-        
-    else:
-        # Clusterers dynamic setup
-        if clusterer_choice == "MiniBatchKMeans":
-            clusterer = CLUSTERERS[clusterer_choice](n_clusters=8, metric='euclidean')
-        elif clusterer_choice == "HDBSCAN":
-            clusterer = CLUSTERERS[clusterer_choice](min_cluster_size=max(2, min(5, len(gallery)//2)), metric='euclidean')
-        elif clusterer_choice == "Louvain":
-            clusterer = CLUSTERERS[clusterer_choice](n_neighbors=5, metric='cosine')
-
-        searcher = SEARCHERS[searcher_choice]()
-
-        print("\n[+] Running pipeline...")
-        runner = PipelineRunner(extractor, reducer, clusterer, searcher)
-        out = runner.run(gallery, probe, test_name=test_name, file_exists_action="overwrite")
-        
-        output_csv = os.path.join("results/pipelines", f"{test_name}.csv")
-        print(f"\n[+] Execution finished! Results saved to {output_csv}")
-        print(f"    Timers: {out['timers']}")
-        
-        from core.visualization.chart_generator import ChartGenerator
-        chart_gen = ChartGenerator(output_dir="results/charts")
-        json_path = os.path.join("results/pipelines", f"{test_name}.json")
-        chart_gen.generate_all_charts(output_csv, json_path, test_name)
+        print(f"[+] Generating visual query report for {batch_name}...")
+        chart_gen.generate_single_query_chart(batch_name, query_info, pipeline_results_dict)
+        print(f"    Chart saved to {chart_gen.query_dir}/{batch_name}_query_results.png")
+            
+    elif not is_reduction_analysis and len(pipelines_to_run) > 1:
+        chart_gen.generate_comparative_charts(batch_name, test_names, csv_paths, json_paths)
 
 if __name__ == "__main__":
     run_tui()
