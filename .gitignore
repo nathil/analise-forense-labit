@@ -20,7 +20,10 @@ data/*
 results/*
 !results/pipelines/
 !results/reduction-analysis/
+!results/charts/
 results/pipelines/*
 !results/pipelines/.keep
 results/reduction-analysis/*
 !results/reduction-analysis/.keep
+results/charts/*
+!results/charts/.keep

@@ -257,6 +257,12 @@ def run_tui():
         
         print(f"\n[+] Execution finished! Results saved to {output_csv}")
         print(f"    Timers: {out['timers']}")
+        
+        from core.visualization.chart_generator import ChartGenerator
+        chart_gen = ChartGenerator(output_dir="results/charts")
+        test_name = os.path.splitext(os.path.basename(output_csv))[0]
+        json_path = os.path.splitext(output_csv)[0] + ".json"
+        chart_gen.generate_all_charts(output_csv, json_path, test_name)
 
 if __name__ == "__main__":
     run_tui()
