@@ -130,29 +130,11 @@ def run_tui():
     probe = []
     dataset_full = []
     
-    # 2. Partitioning
-    start_str = questionary.text("Dataset partition start index (default 0):", validate=is_valid_int).ask()
-    if start_str is None: return
-    length_str = questionary.text("Dataset partition length (default all):", validate=is_valid_int).ask()
-    if length_str is None: return
-    
-    start_idx = int(start_str) if start_str.strip() else 0
-    length_idx = int(length_str) if length_str.strip() else None
-
-    # Load Data
+    # 2. Resolve and Load Dataset Full Metadata
     if "Dummy" in dataset_source:
         print("Creating dummy dataset...")
         g, p = create_dummy_dataset()
-        dataset = g + p
-        if length_idx is not None:
-            dataset = dataset[start_idx:start_idx+length_idx]
-        else:
-            dataset = dataset[start_idx:]
-            
-        dataset_full = dataset
-        splitter = DatasetSplitter()
-        gallery, probe = splitter.split(dataset)
-        print(f"Loaded {len(gallery)} gallery images and {len(probe)} probe images.")
+        dataset_full = g + p
     else:
         if "Local" in dataset_source:
             dataset_path = questionary.path("Enter path to the local BivTatt directory:").ask()
@@ -161,7 +143,6 @@ def run_tui():
         elif "Kagglehub" in dataset_source:
             print("Resolving dataset via Kagglehub...")
             import kagglehub
-            # Change kagglehub cache directory to our data folder if possible
             os.environ['KAGGLEHUB_CACHE'] = os.path.join(os.getcwd(), 'data', 'kagglehub')
             dataset_path = kagglehub.dataset_download("mexwell/bivtatt-dataset")
             if not os.path.exists(os.path.join(dataset_path, "images")):
@@ -174,17 +155,44 @@ def run_tui():
         
         if dataset_path:
             loader = BivTattDatasetLoader(dataset_path)
-            dataset = loader.load_dataset(start=start_idx, length=length_idx)
-            dataset_full = dataset
-            splitter = DatasetSplitter()
-            gallery, probe = splitter.split(dataset)
-            print(f"Loaded {len(gallery)} gallery images and {len(probe)} probe images.")
+            dataset_full = loader.load_dataset(start=0, length=None)
+        else:
+            return
 
-    if not gallery or not probe:
-        print("Dataset does not have enough gallery/probe splits. Exiting.")
+    total_items = len(dataset_full)
+    print(f"\n[+] Dataset resolved. Total items available: {total_items}")
+
+    if total_items == 0:
+        print("Dataset is empty. Exiting.")
         return
 
-    # 3. Component Selection
+    # 3. Partitioning
+    start_str = questionary.text(f"Dataset partition start index (0 to {total_items - 1}, default 0):", validate=is_valid_int).ask()
+    if start_str is None: return
+    start_idx = int(start_str) if start_str.strip() else 0
+    
+    max_length = total_items - start_idx
+    length_str = questionary.text(f"Dataset partition length (max {max_length}, default all):", validate=is_valid_int).ask()
+    if length_str is None: return
+    length_idx = int(length_str) if length_str.strip() else None
+
+    # Slice and Split
+    if length_idx is not None:
+        dataset = dataset_full[start_idx:start_idx+length_idx]
+    else:
+        dataset = dataset_full[start_idx:]
+        
+    splitter = DatasetSplitter()
+    gallery, probe = splitter.split(dataset)
+    print(f"Loaded {len(gallery)} gallery images and {len(probe)} probe images for this run.")
+
+    if not gallery or not probe:
+        print("Partition does not have enough gallery/probe splits. Exiting.")
+        return
+
+    # 4. Component Selection
+
+
     device = questionary.select("Select computation device:", choices=["cuda", "cpu"]).ask()
     if not device: return
     
