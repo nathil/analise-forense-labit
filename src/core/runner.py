@@ -221,3 +221,62 @@ class PipelineRunner:
             "results": results,
             "metrics": metrics_data
         }
+
+    def run_single_query(self, gallery: List[Dict], probe_item: Dict, top_k: int = 5) -> Dict:
+        """
+        Executes the pipeline to search for a single probe image and returns detailed results.
+        """
+        timers = {}
+        
+        # 1. Feature Extraction (Gallery)
+        t0 = time.time()
+        gallery_vectors = []
+        for item in gallery:
+            gallery_vectors.append(self._process_image(item))
+        gallery_vectors = np.array(gallery_vectors)
+        timers['extraction_gallery'] = time.time() - t0
+        
+        # 2. Dimensionality Reduction
+        t0 = time.time()
+        self.reducer.fit(gallery_vectors)
+        reduced_gallery = self.reducer.transform(gallery_vectors)
+        timers['reduction_fit_transform'] = time.time() - t0
+        
+        # 3. Clustering
+        t0 = time.time()
+        self.clusterer.fit(reduced_gallery)
+        labels = self.clusterer.predict(reduced_gallery)
+        centers = self.clusterer.cluster_centers
+        timers['clustering'] = time.time() - t0
+        
+        # 4. Indexing
+        t0 = time.time()
+        self.index_searcher.build_index(reduced_gallery, gallery, centers, labels)
+        timers['indexing'] = time.time() - t0
+        
+        # 5. Querying
+        t0 = time.time()
+        p_vec = self._process_image(probe_item)
+        p_vec_red = self.reducer.transform(np.array([p_vec]))[0]
+        
+        top_matches = self.index_searcher.search(p_vec_red, top_k=top_k)
+        
+        results = []
+        for rank, (match_meta, dist) in enumerate(top_matches, start=1):
+            results.append({
+                "match_rank": rank,
+                "match_label": match_meta['label'],
+                "match_image": match_meta['filename'],
+                "match_image_path": match_meta['image_path'],
+                "distance": float(dist),
+                "is_correct": probe_item['label'] == match_meta['label']
+            })
+        timers['querying'] = time.time() - t0
+        
+        return {
+            "query_image": probe_item['filename'],
+            "query_image_path": probe_item['image_path'],
+            "query_label": probe_item['label'],
+            "results": results,
+            "timers": timers
+        }
