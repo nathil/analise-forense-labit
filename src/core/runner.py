@@ -43,6 +43,28 @@ class PipelineRunner:
         vector = self.extractor.extract(img)
         return vector
 
+    def _process_image_detailed(self, item: Dict) -> Dict:
+        """Process image and return intermediate steps for detailed analysis."""
+        img = cv2.imread(item['image_path'])
+        if img is None:
+            raise ValueError(f"Failed to load image at {item['image_path']}")
+            
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        raw_img = img.copy()
+        
+        if item.get('box_path'):
+            box = BoundingBoxCrop.parse_box_file(item['box_path'])
+            img = BoundingBoxCrop.crop_image(img, box)
+            
+        cropped_img = img.copy()
+        vector = self.extractor.extract(img)
+        
+        return {
+            "raw_image": raw_img,
+            "cropped_image": cropped_img,
+            "feature_vector": vector
+        }
+
     def run(self, gallery: List[Dict], probe: List[Dict], 
             test_name: str,
             output_dir: str = "results/pipelines", 
@@ -256,7 +278,8 @@ class PipelineRunner:
         
         # 5. Querying
         t0 = time.time()
-        p_vec = self._process_image(probe_item)
+        p_details = self._process_image_detailed(probe_item)
+        p_vec = p_details["feature_vector"]
         p_vec_red = self.reducer.transform(np.array([p_vec]))[0]
         
         top_matches = self.index_searcher.search(p_vec_red, top_k=top_k)
@@ -278,5 +301,15 @@ class PipelineRunner:
             "query_image_path": probe_item['image_path'],
             "query_label": probe_item['label'],
             "results": results,
-            "timers": timers
+            "timers": timers,
+            "journey": {
+                "raw_image": p_details["raw_image"],
+                "cropped_image": p_details["cropped_image"],
+                "feature_vector": p_vec,
+                "reduced_vector": p_vec_red,
+                "reduced_gallery": reduced_gallery,
+                "gallery_labels": labels,
+                "gallery": gallery,
+                "top_matches": top_matches
+            }
         }

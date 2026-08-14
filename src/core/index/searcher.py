@@ -44,7 +44,11 @@ class IndexSearcher:
         probe_2d = probe_vector.reshape(1, -1)
         
         # 1. Find closest centroid
-        centroid_dists = pairwise_distances(probe_2d, self.cluster_centers, metric=self.metric)[0]
+        if self.metric == 'dot':
+            centroid_dists = -np.dot(probe_2d, self.cluster_centers.T)[0]
+        else:
+            centroid_dists = pairwise_distances(probe_2d, self.cluster_centers, metric=self.metric)[0]
+            
         best_cluster = np.argmin(centroid_dists)
         
         # 2. Search only within the closest cluster
@@ -54,7 +58,10 @@ class IndexSearcher:
         if cluster_vecs is None or len(cluster_vecs) == 0:
             return []
             
-        dists = pairwise_distances(probe_2d, cluster_vecs, metric=self.metric)[0]
+        if self.metric == 'dot':
+            dists = -np.dot(probe_2d, cluster_vecs.T)[0]
+        else:
+            dists = pairwise_distances(probe_2d, cluster_vecs, metric=self.metric)[0]
         
         # 3. Get Top K
         top_indices = np.argsort(dists)[:top_k]

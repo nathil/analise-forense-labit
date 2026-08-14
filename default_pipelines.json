@@ -1,0 +1,72 @@
+[
+    {
+        "test_name": "Pipeline 1",
+        "extractor": "ResNet50",
+        "reducer": "PCA",
+        "clusterer": "MiniBatchKMeans",
+        "searcher": "IndexSearcher (Euclidean)"
+    },
+    {
+        "test_name": "Pipeline 2",
+        "extractor": "EfficientNet",
+        "reducer": "PCA",
+        "clusterer": "MiniBatchKMeans",
+        "searcher": "IndexSearcher (Euclidean)"
+    },
+    {
+        "test_name": "Pipeline 3",
+        "extractor": "ViT",
+        "reducer": "UMAP",
+        "clusterer": "HDBSCAN",
+        "searcher": "IndexSearcher (Euclidean)"
+    },
+    {
+        "test_name": "Pipeline 4",
+        "extractor": "DINOv2",
+        "reducer": "UMAP",
+        "clusterer": "HDBSCAN",
+        "searcher": "IndexSearcher (Euclidean)"
+    },
+    {
+        "test_name": "Pipeline 5",
+        "extractor": "CLIP",
+        "reducer": "KNN Graph",
+        "clusterer": "Louvain",
+        "searcher": "IndexSearcher (Cosine)"
+    },
+    {
+        "test_name": "Pipeline 6",
+        "extractor": "ResNet50",
+        "reducer": "SVD",
+        "clusterer": "MiniBatchKMeans",
+        "searcher": "IndexSearcher (Dot Product)"
+    },
+    {
+        "test_name": "Pipeline 7",
+        "extractor": "EfficientNet",
+        "reducer": "SVD",
+        "clusterer": "MiniBatchKMeans",
+        "searcher": "IndexSearcher (Dot Product)"
+    },
+    {
+        "test_name": "Pipeline 8",
+        "extractor": "ViT",
+        "reducer": "SVD",
+        "clusterer": "MiniBatchKMeans",
+        "searcher": "IndexSearcher (Dot Product)"
+    },
+    {
+        "test_name": "Pipeline 9",
+        "extractor": "DINOv2",
+        "reducer": "SVD",
+        "clusterer": "MiniBatchKMeans",
+        "searcher": "IndexSearcher (Dot Product)"
+    },
+    {
+        "test_name": "Pipeline 10",
+        "extractor": "CLIP",
+        "reducer": "SVD",
+        "clusterer": "MiniBatchKMeans",
+        "searcher": "IndexSearcher (Dot Product)"
+    }
+]

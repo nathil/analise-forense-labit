@@ -22,6 +22,7 @@ from core.extractors.clip import CLIPExtractor
 from core.reducers.pca import PCAReducer, SVDReducer
 from core.reducers.umap_proj import UMAPReducer
 from core.reducers.passthrough import PassThroughReducer
+from core.reducers.graph import KNNGraphReducer
 
 from core.clustering.kmeans import MiniBatchKMeansClusterer
 from core.clustering.hdbscan import HDBSCANClusterer
@@ -41,7 +42,8 @@ REDUCERS = {
     "PCA": PCAReducer,
     "SVD": SVDReducer,
     "UMAP": UMAPReducer,
-    "PassThrough": PassThroughReducer
+    "PassThrough": PassThroughReducer,
+    "KNN Graph": KNNGraphReducer
 }
 
 CLUSTERERS = {
@@ -52,7 +54,8 @@ CLUSTERERS = {
 
 SEARCHERS = {
     "IndexSearcher (Euclidean)": lambda: IndexSearcher(metric='euclidean'),
-    "IndexSearcher (Cosine)": lambda: IndexSearcher(metric='cosine')
+    "IndexSearcher (Cosine)": lambda: IndexSearcher(metric='cosine'),
+    "IndexSearcher (Dot Product)": lambda: IndexSearcher(metric='dot')
 }
 
 
@@ -301,37 +304,50 @@ def run_tui():
 
     pipelines_to_run = []
     
-    if is_reduction_analysis:
-        extractor_choice = questionary.select("Select Feature Extractor:", choices=list(EXTRACTORS.keys())).ask()
-        if not extractor_choice: return
-        reducer_choice = questionary.select("Select Dimensionality Reducer:", choices=list(REDUCERS.keys())).ask()
-        if not reducer_choice: return
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_name = f"{timestamp}_{extractor_choice}_{reducer_choice}"
-        test_name_input = questionary.text(f"Enter a name for this run (leave blank to use: {default_name}):").ask()
-        if test_name_input is None: return
-        test_name = test_name_input.strip() or default_name
-        
-        pipelines_to_run.append({
-            "extractor": extractor_choice,
-            "reducer": reducer_choice,
-            "test_name": test_name
-        })
+    config_mode = questionary.select(
+        "Select Pipeline Configuration Mode:",
+        choices=[
+            "Load predefined from default_pipelines.json",
+            "Manual/Custom Selection"
+        ]
+    ).ask()
+    
+    if not config_mode: return
+    
+    if "Load predefined" in config_mode:
+        try:
+            import json
+            with open("default_pipelines.json", "r") as f:
+                predefined = json.load(f)
+            
+            for p in predefined:
+                if is_reduction_analysis:
+                    pipelines_to_run.append({
+                        "extractor": p["extractor"],
+                        "reducer": p["reducer"],
+                        "test_name": p.get("test_name", f"{p['extractor']}_{p['reducer']}")
+                    })
+                else:
+                    pipelines_to_run.append({
+                        "extractor": p["extractor"],
+                        "reducer": p["reducer"],
+                        "clusterer": p["clusterer"],
+                        "searcher": p["searcher"],
+                        "test_name": p.get("test_name", f"{p['extractor']}_{p['reducer']}_{p['clusterer']}_{p['searcher']}")
+                    })
+            print(f"Loaded {len(pipelines_to_run)} predefined pipelines.")
+        except Exception as e:
+            print(f"Error loading predefined pipelines: {e}")
+            return
     else:
-        while True:
+        if is_reduction_analysis:
             extractor_choice = questionary.select("Select Feature Extractor:", choices=list(EXTRACTORS.keys())).ask()
             if not extractor_choice: return
             reducer_choice = questionary.select("Select Dimensionality Reducer:", choices=list(REDUCERS.keys())).ask()
             if not reducer_choice: return
-            clusterer_choice = questionary.select("Select Clusterer:", choices=list(CLUSTERERS.keys())).ask()
-            if not clusterer_choice: return
-            searcher_choice = questionary.select("Select Index Searcher:", choices=list(SEARCHERS.keys())).ask()
-            if not searcher_choice: return
             
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            s_choice = searcher_choice.split(" ")[0] if searcher_choice else "Searcher"
-            default_name = f"{timestamp}_{extractor_choice}_{reducer_choice}_{clusterer_choice}_{s_choice}"
+            default_name = f"{timestamp}_{extractor_choice}_{reducer_choice}"
             test_name_input = questionary.text(f"Enter a name for this run (leave blank to use: {default_name}):").ask()
             if test_name_input is None: return
             test_name = test_name_input.strip() or default_name
@@ -339,14 +355,37 @@ def run_tui():
             pipelines_to_run.append({
                 "extractor": extractor_choice,
                 "reducer": reducer_choice,
-                "clusterer": clusterer_choice,
-                "searcher": searcher_choice,
                 "test_name": test_name
             })
-            
-            add_more = questionary.confirm("Add another pipeline to compare?").ask()
-            if not add_more:
-                break
+        else:
+            while True:
+                extractor_choice = questionary.select("Select Feature Extractor:", choices=list(EXTRACTORS.keys())).ask()
+                if not extractor_choice: return
+                reducer_choice = questionary.select("Select Dimensionality Reducer:", choices=list(REDUCERS.keys())).ask()
+                if not reducer_choice: return
+                clusterer_choice = questionary.select("Select Clusterer:", choices=list(CLUSTERERS.keys())).ask()
+                if not clusterer_choice: return
+                searcher_choice = questionary.select("Select Index Searcher:", choices=list(SEARCHERS.keys())).ask()
+                if not searcher_choice: return
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                s_choice = searcher_choice.split(" ")[0] if searcher_choice else "Searcher"
+                default_name = f"{timestamp}_{extractor_choice}_{reducer_choice}_{clusterer_choice}_{s_choice}"
+                test_name_input = questionary.text(f"Enter a name for this run (leave blank to use: {default_name}):").ask()
+                if test_name_input is None: return
+                test_name = test_name_input.strip() or default_name
+                
+                pipelines_to_run.append({
+                    "extractor": extractor_choice,
+                    "reducer": reducer_choice,
+                    "clusterer": clusterer_choice,
+                    "searcher": searcher_choice,
+                    "test_name": test_name
+                })
+                
+                add_more = questionary.confirm("Add another pipeline to compare?").ask()
+                if not add_more:
+                    break
                 
     batch_name = None
     if not is_reduction_analysis and len(pipelines_to_run) > 1:
@@ -416,6 +455,16 @@ def run_tui():
                 print(f"\n[+] Running Single Query pipeline ({t_name})...")
                 out = runner.run_single_query(gallery, probe[probe_index], top_k=top_k)
                 
+                j = out["journey"]
+                v_raw = j["feature_vector"]
+                v_red = j["reduced_vector"]
+                print(f"    -> Raw Feature Vector : Dim {len(v_raw)}, Min: {v_raw.min():.4f}, Max: {v_raw.max():.4f}, Mean: {v_raw.mean():.4f}")
+                print(f"    -> Reduced Vector     : Dim {len(v_red)}, Min: {v_red.min():.4f}, Max: {v_red.max():.4f}, Mean: {v_red.mean():.4f}")
+                
+                journey_path = os.path.join("results/charts/query", f"{batch_name}_{t_name}_journey.png")
+                chart_gen.generate_pipeline_journey_chart(j, journey_path)
+                print(f"    -> Pipeline Journey Chart saved to: {journey_path}")
+                
                 if 'query_info' not in locals():
                     query_info = {
                         "query_image": out["query_image"],
@@ -424,7 +473,24 @@ def run_tui():
                     }
                     pipeline_results_dict = {}
                     
-                pipeline_results_dict[t_name] = out["results"]
+                pipeline_results_dict[t_name] = {
+                    "matches": out["results"],
+                    "vector_stats": {
+                        "raw_feature_vector": {
+                            "dim": len(v_raw),
+                            "min": float(v_raw.min()),
+                            "max": float(v_raw.max()),
+                            "mean": float(v_raw.mean())
+                        },
+                        "reduced_vector": {
+                            "dim": len(v_red),
+                            "min": float(v_red.min()),
+                            "max": float(v_red.max()),
+                            "mean": float(v_red.mean())
+                        }
+                    },
+                    "journey_chart_path": journey_path
+                }
                 print(f"    Execution finished for {t_name}. Results captured.")
                 
             else:

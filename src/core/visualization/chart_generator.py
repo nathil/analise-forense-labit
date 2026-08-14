@@ -336,13 +336,21 @@ class ChartGenerator:
         if num_pipelines == 0:
             return
             
-        top_k = len(list(pipeline_results.values())[0])
+        first_val = list(pipeline_results.values())[0]
+        if isinstance(first_val, dict) and "matches" in first_val:
+            top_k = len(first_val["matches"])
+        else:
+            top_k = len(first_val)
         
         fig, axes = plt.subplots(num_pipelines, top_k + 1, figsize=(3 * (top_k + 1), 3 * num_pipelines))
         if num_pipelines == 1:
             axes = np.expand_dims(axes, axis=0)
             
-        for i, (pipe_name, matches) in enumerate(pipeline_results.items()):
+        for i, (pipe_name, pipe_data) in enumerate(pipeline_results.items()):
+            if isinstance(pipe_data, dict) and "matches" in pipe_data:
+                matches = pipe_data["matches"]
+            else:
+                matches = pipe_data
             # Query Image
             ax_q = axes[i, 0]
             try:
@@ -478,3 +486,89 @@ class ChartGenerator:
         plt.close()
 
         print(f"    Grid Search Charts saved to {self.grid_search_dir}")
+
+    def generate_pipeline_journey_chart(self, journey_data: dict, output_path: str):
+        """
+        Generates a step-by-step dashboard for a single query.
+        """
+        import matplotlib.patches as patches
+        import cv2
+        
+        fig = plt.figure(figsize=(20, 10))
+        gs = fig.add_gridspec(2, 3)
+        
+        # 1. Original Image
+        ax1 = fig.add_subplot(gs[0, 0])
+        ax1.imshow(journey_data["raw_image"])
+        ax1.set_title("1. Original Image")
+        ax1.axis("off")
+        
+        # 2. Preprocessed Image
+        ax2 = fig.add_subplot(gs[0, 1])
+        ax2.imshow(journey_data["cropped_image"])
+        ax2.set_title("2. Preprocessed (Cropped)")
+        ax2.axis("off")
+        
+        # 3. Feature Vector Heatmap
+        ax3 = fig.add_subplot(gs[0, 2])
+        vec = journey_data["feature_vector"]
+        width = int(np.ceil(np.sqrt(len(vec))))
+        pad = width**2 - len(vec)
+        vec_padded = np.pad(vec, (0, pad), 'constant')
+        vec_2d = vec_padded.reshape((width, width))
+        im3 = ax3.imshow(vec_2d, cmap='viridis', aspect='auto')
+        ax3.set_title(f"3. Raw Features (Dim: {len(vec)})")
+        ax3.axis("off")
+        fig.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
+        
+        # 4. Reduced Space Projection
+        ax4 = fig.add_subplot(gs[1, 0:2])
+        red_gal = journey_data["reduced_gallery"]
+        labels = journey_data.get("gallery_labels", None)
+        query_red = journey_data["reduced_vector"]
+        
+        if red_gal is not None and len(red_gal) > 0:
+            if red_gal.shape[1] > 2:
+                from sklearn.decomposition import PCA
+                pca = PCA(n_components=2)
+                red_gal_2d = pca.fit_transform(red_gal)
+                query_red_2d = pca.transform(query_red.reshape(1, -1))[0]
+            else:
+                red_gal_2d = red_gal[:, :2]
+                query_red_2d = query_red[:2]
+                
+            if labels is not None:
+                ax4.scatter(red_gal_2d[:, 0], red_gal_2d[:, 1], c=labels, cmap='tab20', alpha=0.5, s=20)
+            else:
+                ax4.scatter(red_gal_2d[:, 0], red_gal_2d[:, 1], c='gray', alpha=0.5, s=20)
+                
+            ax4.scatter(query_red_2d[0], query_red_2d[1], c='red', marker='*', s=300, edgecolor='black', label="Query")
+            ax4.legend()
+            
+        ax4.set_title(f"4. Reduced Space (Dim: {len(query_red)})")
+        
+        # 5. Top Matches
+        ax5 = fig.add_subplot(gs[1, 2])
+        ax5.axis("off")
+        ax5.set_title("5. Top Matches", pad=20)
+        
+        matches = journey_data["top_matches"]
+        n_matches = min(len(matches), 5)
+        if n_matches > 0:
+            match_gs = gs[1, 2].subgridspec(1, n_matches)
+            for i in range(n_matches):
+                match_meta, dist = matches[i]
+                match_ax = fig.add_subplot(match_gs[0, i])
+                try:
+                    m_img = cv2.imread(match_meta['image_path'])
+                    m_img = cv2.cvtColor(m_img, cv2.COLOR_BGR2RGB)
+                    match_ax.imshow(m_img)
+                except:
+                    match_ax.text(0.5, 0.5, 'Error', ha='center', va='center')
+                    
+                match_ax.axis("off")
+                match_ax.set_title(f"Rank {i+1}\nD: {dist:.2f}", fontsize=9)
+                
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close()
