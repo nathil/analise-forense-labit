@@ -17,7 +17,7 @@ class DINOv2Extractor(FeatureExtractor):
         else:
             self.device = torch.device(device)
         
-        self.processor = AutoImageProcessor.from_pretrained(model_name, use_fast=True)
+        self.processor = AutoImageProcessor.from_pretrained(model_name)
         self.model = AutoModel.from_pretrained(model_name).to(self.device)
         self.model.eval()
 
