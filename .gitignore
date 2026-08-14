@@ -22,6 +22,7 @@ results/*
 !results/reduction-analysis/
 !results/charts/
 !results/query/
+!results/grid-search/
 results/pipelines/*
 !results/pipelines/.keep
 results/reduction-analysis/*
@@ -29,12 +30,17 @@ results/reduction-analysis/*
 results/charts/*
 !results/charts/pipeline/
 !results/charts/multiple-pipelines/
+!results/charts/query/
+!results/charts/grid-search/
 results/charts/pipeline/*
 !results/charts/pipeline/.keep
 results/charts/multiple-pipelines/*
 !results/charts/multiple-pipelines/.keep
-!results/charts/query/
 results/charts/query/*
 !results/charts/query/.keep
+results/charts/grid-search/*
+!results/charts/grid-search/.keep
 results/query/*
 !results/query/.keep
+results/grid-search/*
+!results/grid-search/.keep

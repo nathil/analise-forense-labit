@@ -14,9 +14,11 @@ class ChartGenerator:
         self.pipeline_dir = os.path.join(self.output_dir, "pipeline")
         self.multiple_pipelines_dir = os.path.join(self.output_dir, "multiple-pipelines")
         self.query_dir = os.path.join(self.output_dir, "query")
+        self.grid_search_dir = os.path.join(self.output_dir, "grid-search")
         os.makedirs(self.pipeline_dir, exist_ok=True)
         os.makedirs(self.multiple_pipelines_dir, exist_ok=True)
         os.makedirs(self.query_dir, exist_ok=True)
+        os.makedirs(self.grid_search_dir, exist_ok=True)
         # Apply standard seaborn theme
         sns.set_theme(style="whitegrid", palette="muted")
         
@@ -383,4 +385,96 @@ class ChartGenerator:
         plt.savefig(os.path.join(self.query_dir, f"{batch_name}_query_results.png"), dpi=150, bbox_inches='tight')
         plt.close()
         
-        print(f"    Comparative Charts saved to {self.multiple_pipelines_dir}")
+        print(f"    Single Query Chart saved to {self.query_dir}")
+
+    def generate_grid_search_charts(self, batch_name: str, summary_df: pd.DataFrame):
+        """
+        Generates high-density comparative charts specifically designed for Grid Search evaluation.
+        """
+        print(f"\n[+] Generating Grid Search analytical charts for {batch_name}...")
+        if summary_df.empty:
+            print("[-] Warning: Summary dataframe is empty, skipping charts.")
+            return
+
+        # 1. Leaderboard (Top 15 Pipelines by mAP)
+        top_n = min(15, len(summary_df))
+        df_top = summary_df.head(top_n).copy()
+        
+        plt.figure(figsize=(12, max(6, top_n * 0.45)))
+        # Reverse order for horizontal plot so #1 is at the top
+        df_plot = df_top.iloc[::-1]
+        
+        colors = ["#3B82F6" if i != len(df_plot) - 1 else "#F59E0B" for i in range(len(df_plot))]
+        bars = plt.barh(df_plot["pipeline_name"], df_plot["mAP"], color=colors, edgecolor="black", alpha=0.85)
+        
+        for bar, val, top1 in zip(bars, df_plot["mAP"], df_plot["top1_accuracy"]):
+            plt.text(bar.get_width() + 0.01, bar.get_y() + bar.get_height()/2,
+                     f"mAP: {val:.3f} (Top-1: {top1*100:.1f}%)",
+                     va='center', fontsize=9, fontweight='bold')
+                     
+        best_pipe = summary_df.iloc[0]
+        plt.title(f"Grid Search Leaderboard (Top {top_n} Pipelines)\nBest: {best_pipe['pipeline_name']} (mAP: {best_pipe['mAP']:.4f})",
+                  fontsize=14, fontweight='bold', pad=15)
+        plt.xlabel("Mean Average Precision (mAP)", fontsize=12)
+        plt.xlim(0, max(0.1, summary_df["mAP"].max() * 1.25))
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.grid_search_dir, f"{batch_name}_leaderboard_top_pipelines.png"), dpi=150, bbox_inches='tight')
+        plt.close()
+
+        # 2. Extractor x Reducer Heatmap
+        if len(summary_df["extractor"].unique()) >= 1 and len(summary_df["reducer"].unique()) >= 1:
+            plt.figure(figsize=(9, 6))
+            pivot_map = summary_df.pivot_table(index="extractor", columns="reducer", values="mAP", aggfunc="mean")
+            sns.heatmap(pivot_map, annot=True, fmt=".3f", cmap="YlGnBu", cbar_kws={'label': 'Average mAP'}, linewidths=0.5)
+            plt.title(f"Component Interaction: Mean mAP by Extractor & Reducer\n{batch_name}", fontsize=13, fontweight='bold', pad=15)
+            plt.ylabel("Feature Extractor", fontsize=11)
+            plt.xlabel("Dimensionality Reducer", fontsize=11)
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.grid_search_dir, f"{batch_name}_extractor_reducer_heatmap.png"), dpi=150, bbox_inches='tight')
+            plt.close()
+
+        # 3. Execution Time vs Performance Trade-off (Pareto / Scatter)
+        plt.figure(figsize=(10, 6))
+        sns.scatterplot(
+            data=summary_df,
+            x="total_time",
+            y="mAP",
+            hue="extractor",
+            style="reducer",
+            s=120,
+            alpha=0.85
+        )
+        
+        # Highlight best pipeline with star
+        plt.scatter(
+            best_pipe["total_time"],
+            best_pipe["mAP"],
+            color="gold",
+            edgecolor="black",
+            s=300,
+            marker="*",
+            label=f"★ Best ({best_pipe['pipeline_name'][:25]}...)",
+            zorder=10
+        )
+        
+        plt.title(f"Execution Time vs Performance Trade-off\n{batch_name}", fontsize=13, fontweight='bold', pad=15)
+        plt.xlabel("Total Execution Time (seconds)", fontsize=11)
+        plt.ylabel("Mean Average Precision (mAP)", fontsize=11)
+        plt.grid(True, linestyle="--", alpha=0.7)
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.grid_search_dir, f"{batch_name}_time_vs_accuracy_tradeoff.png"), dpi=150, bbox_inches='tight')
+        plt.close()
+
+        # 4. Metric Distribution by Extractor
+        plt.figure(figsize=(10, 6))
+        sns.boxplot(data=summary_df, x="extractor", y="mAP", hue="extractor", legend=False, palette="Set2", boxprops=dict(alpha=0.7))
+        sns.stripplot(data=summary_df, x="extractor", y="mAP", color="black", alpha=0.5, jitter=0.2, size=6)
+        plt.title(f"Performance Distribution by Extractor Architecture\n{batch_name}", fontsize=13, fontweight='bold', pad=15)
+        plt.xlabel("Feature Extractor", fontsize=11)
+        plt.ylabel("Mean Average Precision (mAP)", fontsize=11)
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.grid_search_dir, f"{batch_name}_metric_distributions_by_extractor.png"), dpi=150, bbox_inches='tight')
+        plt.close()
+
+        print(f"    Grid Search Charts saved to {self.grid_search_dir}")

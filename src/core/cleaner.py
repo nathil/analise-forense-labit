@@ -8,7 +8,9 @@ class WorkspaceCleaner:
         "multiple-pipelines": ["results/charts/multiple-pipelines"],
         "pipeline": ["results/charts/pipeline"],
         "pipelines": ["results/pipelines"],
-        "reduction-analysis": ["results/reduction-analysis"]
+        "reduction-analysis": ["results/reduction-analysis"],
+        "query": ["results/query", "results/charts/query"],
+        "grid-search": ["results/grid-search", "results/charts/grid-search"]
     }
 
     @classmethod
