@@ -98,7 +98,7 @@ def is_valid_int(val):
 
 def run_tui():
     print("=" * 60)
-    print(" 🔎 ForensTatt Core - Interactive Pipeline Builder")
+    print(" ForensTatt - Pipeline Runner")
     print("=" * 60)
     
     mode = questionary.select(
@@ -106,15 +106,16 @@ def run_tui():
         choices=[
             "1. Full Pipeline Execution",
             "2. Single Query Execution",
-            "3. Dimensionality Reduction Analysis",
-            "4. Clear Results & Data"
+            "3. Grid Search (All Combinations)",
+            "4. Dimensionality Reduction Analysis",
+            "5. Clear Results & Data"
         ]
     ).ask()
     
     if not mode:
         return
         
-    if "4." in mode:
+    if "5." in mode:
         from core.cleaner import WorkspaceCleaner
         targets = questionary.checkbox(
             "Select which folders to clear:",
@@ -124,7 +125,9 @@ def run_tui():
                 "reduction-analysis",
                 "charts",
                 "multiple-pipelines",
-                "pipeline"
+                "pipeline",
+                "query",
+                "grid-search"
             ]
         ).ask()
         
@@ -142,7 +145,8 @@ def run_tui():
             print("Operation cancelled.")
         return
         
-    is_reduction_analysis = "3." in mode
+    is_grid_search = "3." in mode
+    is_reduction_analysis = "4." in mode
     is_single_query = "2." in mode
 
     # 1. Dataset Selection
@@ -255,6 +259,46 @@ def run_tui():
     device = questionary.select("Select computation device:", choices=["cuda", "cpu"]).ask()
     if not device: return
     
+    if is_grid_search:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"{timestamp}_grid_search"
+        test_name_input = questionary.text(f"Enter a name for this Grid Search run (leave blank to use: {default_name}):").ask()
+        if test_name_input is None: return
+        test_name = test_name_input.strip() or default_name
+
+        confirm = questionary.confirm(f"Execute Grid Search over all {len(EXTRACTORS)*len(REDUCERS)*len(CLUSTERERS)*len(SEARCHERS)} pipeline combinations?").ask()
+        if not confirm: return
+
+        from core.grid_search import GridSearchRunner
+        from core.visualization.chart_generator import ChartGenerator
+
+        chart_gen = ChartGenerator(output_dir="results/charts")
+        grid_runner = GridSearchRunner(
+            extractors=EXTRACTORS,
+            reducers=REDUCERS,
+            clusterers=CLUSTERERS,
+            searchers=SEARCHERS,
+            device=device,
+            top_k=5
+        )
+
+        summary_df, best_pipe = grid_runner.run(gallery, probe, test_name=test_name)
+        chart_gen.generate_grid_search_charts(test_name, summary_df)
+
+        print("\n" + "=" * 60)
+        print(f" 🏆 GRID SEARCH WINNER: {best_pipe['pipeline_name']}")
+        print(f"    - Mean Average Precision (mAP): {best_pipe['mAP']:.4f}")
+        print(f"    - Top-1 Accuracy:               {best_pipe['top1_accuracy']*100:.1f}%")
+        print(f"    - Top-5 Accuracy:               {best_pipe['top5_accuracy']*100:.1f}%")
+        print(f"    - Precision:                    {best_pipe['precision']:.4f}")
+        print(f"    - Recall:                       {best_pipe['recall']:.4f}")
+        print(f"    - F1-Score:                     {best_pipe['f1_score']:.4f}")
+        print(f"    - Total Pipeline Time:          {best_pipe['total_time']:.3f}s")
+        print(f"    - Consolidated CSV:             results/grid-search/{test_name}.csv")
+        print(f"    - Analytical Charts:            results/charts/grid-search/")
+        print("=" * 60 + "\n")
+        return
+
     pipelines_to_run = []
     
     if is_reduction_analysis:
