@@ -19,8 +19,11 @@ class LouvainClusterer(Clusterer):
         """
         Builds a KNN graph and applies Louvain community detection.
         """
+        n_samples = vectors.shape[0]
+        actual_neighbors = min(self.n_neighbors, max(1, n_samples - 1))
+        
         # 1. Generate Adjacency Matrix (KNN Graph)
-        nn = NearestNeighbors(n_neighbors=self.n_neighbors, metric=self.metric)
+        nn = NearestNeighbors(n_neighbors=actual_neighbors, metric=self.metric)
         nn.fit(vectors)
         # mode='distance' gives us distances, we want similarities for edge weights
         adj_matrix = nn.kneighbors_graph(vectors, mode='distance')

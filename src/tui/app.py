@@ -442,7 +442,8 @@ def run_tui():
             
         else:
             if p_config["clusterer"] == "MiniBatchKMeans":
-                clusterer = CLUSTERERS[p_config["clusterer"]](n_clusters=8, metric='euclidean')
+                n_clusters = max(2, min(8, len(gallery) // 2)) if len(gallery) > 2 else len(gallery)
+                clusterer = CLUSTERERS[p_config["clusterer"]](n_clusters=n_clusters, metric='euclidean')
             elif p_config["clusterer"] == "HDBSCAN":
                 clusterer = CLUSTERERS[p_config["clusterer"]](min_cluster_size=max(2, min(5, len(gallery)//2)), metric='euclidean')
             elif p_config["clusterer"] == "Louvain":

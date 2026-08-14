@@ -15,7 +15,10 @@ class UMAPReducer(DimensionalityReducer):
                                metric=metric)
         
     def fit(self, vectors: np.ndarray) -> None:
-        self.model.fit(vectors)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="n_neighbors is larger than the dataset size")
+            self.model.fit(vectors)
         
     def transform(self, vectors: np.ndarray) -> np.ndarray:
         return self.model.transform(vectors)

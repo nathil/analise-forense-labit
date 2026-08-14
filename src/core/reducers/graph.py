@@ -23,12 +23,14 @@ class KNNGraphReducer(DimensionalityReducer):
         if actual_components < 1:
             actual_components = 1
             
-        self.model.set_params(n_components=actual_components)
+        actual_neighbors = min(self.n_neighbors, max(1, n_samples - 1))
+            
+        self.model.set_params(n_components=actual_components, n_neighbors=actual_neighbors)
         reduced = self.model.fit_transform(features)
         
         # Train a regressor to approximate the transform for out-of-sample data
         from sklearn.neighbors import KNeighborsRegressor
-        self._regressor = KNeighborsRegressor(n_neighbors=self.n_neighbors)
+        self._regressor = KNeighborsRegressor(n_neighbors=actual_neighbors)
         self._regressor.fit(features, reduced)
 
     def transform(self, features: np.ndarray) -> np.ndarray:

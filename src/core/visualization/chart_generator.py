@@ -56,7 +56,7 @@ class ChartGenerator:
         import matplotlib.colors as mcolors
         norm = mcolors.LogNorm(vmin=1, vmax=matrix.max() + 1)
         
-        sns.heatmap(matrix, annot=True, fmt='d', cmap='Blues', norm=norm,
+        sns.heatmap(matrix + 1, annot=matrix, fmt='d', cmap='Blues', norm=norm,
                     xticklabels=['Predicted Match', 'Predicted Mismatch'],
                     yticklabels=['Actual Match', 'Actual Mismatch'])
                     
@@ -264,7 +264,7 @@ class ChartGenerator:
             tn = cm.get("tn", 0)
             matrix = np.array([[tp, fn], [fp, tn]])
             norm = mcolors.LogNorm(vmin=1, vmax=matrix.max() + 1)
-            sns.heatmap(matrix, annot=True, fmt='d', cmap='Blues', norm=norm,
+            sns.heatmap(matrix + 1, annot=matrix, fmt='d', cmap='Blues', norm=norm,
                         xticklabels=['Predicted Match', 'Predicted Mismatch'],
                         yticklabels=['Actual Match', 'Actual Mismatch'], ax=axes[i])
             axes[i].set_title(f"{name}", fontsize=12)
