@@ -11,7 +11,7 @@ except ImportError:
     print("Please install questionary using 'uv add questionary'")
     sys.exit(1)
 
-from core.data.loader import BivTattDatasetLoader, DatasetSplitter
+from core.data.loader import BivTattDatasetLoader, DatasetSplitter, WeaponYolov5DatasetLoader
 from core.runner import PipelineRunner
 from core.reduction_analyzer import ReductionAnalyzerRunner
 
@@ -158,7 +158,8 @@ def run_tui():
         choices=[
             "Kagglehub (mexwell/bivtatt-dataset)",
             "Dummy Dataset (Generated for fast testing)",
-            "Local Directory"
+            "Local Directory",
+            "Weapon Dataset for YOLOv5 (Kaggle, class split)"
         ]
     ).ask()
     
@@ -192,9 +193,25 @@ def run_tui():
                     if os.path.exists(os.path.join(subdir, "images")):
                         dataset_path = subdir
                         break
+
+        elif "Weapon Dataset for YOLOv5" in dataset_source:
+            print("Resolving dataset via Kagglehub...")
+            import kagglehub
+            os.environ['KAGGLEHUB_CACHE'] = os.path.join(os.getcwd(), 'data', 'kagglehub')
+            dataset_path = kagglehub.dataset_download("raghavnanjappan/weapon-dataset-for-yolov5")
+            # a base vem aninhada (ex: versions/2/dataset/dataset/images) -- desce ate
+            # a primeira pasta que contem 'images/'
+            if not os.path.isdir(os.path.join(dataset_path, "images")):
+                for cur, dirs, _files in os.walk(dataset_path):
+                    if "images" in dirs:
+                        dataset_path = cur
+                        break
         
         if dataset_path:
-            loader = BivTattDatasetLoader(dataset_path)
+            if "Weapon Dataset for YOLOv5" in dataset_source:
+                loader = WeaponYolov5DatasetLoader(dataset_path)
+            else:
+                loader = BivTattDatasetLoader(dataset_path)
             dataset_full = loader.load_dataset(start=0, length=None)
         else:
             return
