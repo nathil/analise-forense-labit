@@ -16,7 +16,7 @@ class KMeansClusterer(Clusterer):
         self.model = SKKMeans(n_clusters=n_clusters, random_state=42)
         
     def _preprocess(self, vectors: np.ndarray) -> np.ndarray:
-        if self.metric == 'cosine':
+        if self.metric in ['cosine', 'dot']:
             # Apply L2 normalization
             norms = np.linalg.norm(vectors, axis=1, keepdims=True)
             # Avoid division by zero
@@ -25,6 +25,8 @@ class KMeansClusterer(Clusterer):
         return vectors
 
     def fit(self, vectors: np.ndarray) -> None:
+        actual_k = min(self.n_clusters, max(1, vectors.shape[0]))
+        self.model.set_params(n_clusters=actual_k)
         processed_vectors = self._preprocess(vectors)
         self.model.fit(processed_vectors)
         
@@ -34,7 +36,7 @@ class KMeansClusterer(Clusterer):
         
     @property
     def cluster_centers(self) -> np.ndarray:
-        return self.model.cluster_centers_
+        return self._preprocess(self.model.cluster_centers_)
 
 from sklearn.cluster import MiniBatchKMeans as SKMiniBatchKMeans
 
@@ -56,6 +58,8 @@ class MiniBatchKMeansClusterer(Clusterer):
         return vectors
 
     def fit(self, vectors: np.ndarray) -> None:
+        actual_k = min(self.n_clusters, max(1, vectors.shape[0]))
+        self.model.set_params(n_clusters=actual_k)
         processed_vectors = self._preprocess(vectors)
         self.model.fit(processed_vectors)
         
@@ -65,4 +69,4 @@ class MiniBatchKMeansClusterer(Clusterer):
         
     @property
     def cluster_centers(self) -> np.ndarray:
-        return self.model.cluster_centers_
+        return self._preprocess(self.model.cluster_centers_)

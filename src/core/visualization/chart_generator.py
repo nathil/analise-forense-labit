@@ -15,12 +15,21 @@ class ChartGenerator:
         self.multiple_pipelines_dir = os.path.join(self.output_dir, "multiple-pipelines")
         self.query_dir = os.path.join(self.output_dir, "query")
         self.grid_search_dir = os.path.join(self.output_dir, "grid-search")
+        self.reduction_dir = os.path.join(self.output_dir, "reduction-analysis")
         os.makedirs(self.pipeline_dir, exist_ok=True)
         os.makedirs(self.multiple_pipelines_dir, exist_ok=True)
         os.makedirs(self.query_dir, exist_ok=True)
         os.makedirs(self.grid_search_dir, exist_ok=True)
+        os.makedirs(self.reduction_dir, exist_ok=True)
         # Apply standard seaborn theme
         sns.set_theme(style="whitegrid", palette="muted")
+
+    @staticmethod
+    def _clean_display_title(text: str) -> str:
+        """Removes '_teste_X' test run suffixes from visual chart titles while keeping the dataset name."""
+        import re
+        cleaned = re.sub(r"_teste[_\s-]*\d+", "", str(text), flags=re.IGNORECASE)
+        return cleaned.strip(" _-")
         
     def generate_all_charts(self, csv_path: str, json_path: str, test_name: str):
         print(f"\n[+] Generating charts for {test_name}...")
@@ -36,6 +45,8 @@ class ChartGenerator:
         if "performance_metrics" in meta:
             self._plot_metrics_radar(meta, test_name, self.pipeline_dir)
             self._plot_confusion_matrix(meta, test_name, self.pipeline_dir)
+            if "metrics_by_top_k" in meta and len(meta["metrics_by_top_k"]) > 1:
+                self._plot_topk_progression(meta, test_name, self.pipeline_dir)
             
         print(f"    Charts saved to {self.pipeline_dir}")
             
@@ -60,7 +71,7 @@ class ChartGenerator:
                     xticklabels=['Predicted Match', 'Predicted Mismatch'],
                     yticklabels=['Actual Match', 'Actual Mismatch'])
                     
-        plt.title(f"Confusion Matrix - {test_name}", fontsize=14)
+        plt.title(f"Confusion Matrix - {self._clean_display_title(test_name)}", fontsize=14)
         plt.tight_layout()
         plt.savefig(os.path.join(out_dir, f"{test_name}_confusion_matrix.png"), dpi=150)
         plt.close()
@@ -80,16 +91,51 @@ class ChartGenerator:
             cmc_scores.append((len(correct_at_k) / num_probes * 100) if num_probes > 0 else 0)
             
         plt.figure(figsize=(8, 5))
-        plt.plot(ranks, cmc_scores, marker='o', linestyle='-', color='#2ca02c', linewidth=2, markersize=8)
+        marker_sz = 8 if top_k <= 10 else (5 if top_k <= 20 else 3)
+        plt.plot(ranks, cmc_scores, marker='o', linestyle='-', color='#2ca02c', linewidth=2, markersize=marker_sz)
         plt.fill_between(ranks, cmc_scores, alpha=0.2, color='#2ca02c')
-        plt.title(f"Cumulative Match Characteristic (CMC) - {test_name}", fontsize=14)
-        plt.xlabel("Rank", fontsize=12)
+        plt.title(f"Cumulative Match Characteristic (CMC) - {self._clean_display_title(test_name)}", fontsize=14)
+        plt.xlabel("Rank (Top-K)", fontsize=12)
         plt.ylabel("Recognition Rate (%)", fontsize=12)
-        plt.xticks(ranks)
+        if top_k <= 10:
+            plt.xticks(ranks)
+        else:
+            tick_candidates = sorted(set([1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, top_k]))
+            plt.xticks([t for t in tick_candidates if t <= top_k])
         plt.ylim(0, 105)
         plt.grid(True, linestyle='--', alpha=0.7)
         plt.tight_layout()
         plt.savefig(os.path.join(out_dir, f"{test_name}_cmc_curve.png"), dpi=150)
+        plt.close()
+
+    def _plot_topk_progression(self, meta: dict, test_name: str, out_dir: str = None):
+        if out_dir is None: out_dir = self.pipeline_dir
+        metrics_by_k = meta.get("metrics_by_top_k", {})
+        if not metrics_by_k:
+            return
+            
+        k_vals = sorted(int(k) for k in metrics_by_k.keys())
+        topk_acc = [metrics_by_k[str(k)]["performance_metrics"].get(f"top{k}_accuracy", 0.0) * 100 for k in k_vals]
+        recall_vals = [metrics_by_k[str(k)]["performance_metrics"].get("recall", 0.0) * 100 for k in k_vals]
+        map_vals = [metrics_by_k[str(k)]["performance_metrics"].get("mAP", 0.0) * 100 for k in k_vals]
+        
+        plt.figure(figsize=(8, 5))
+        x_labels = [f"Top-{k}" for k in k_vals]
+        x_pos = np.arange(len(k_vals))
+        
+        plt.plot(x_pos, topk_acc, marker='o', linewidth=2.2, label="Top-K Accuracy (%)")
+        plt.plot(x_pos, recall_vals, marker='s', linewidth=2.2, linestyle='--', label="Recall@K (%)")
+        plt.plot(x_pos, map_vals, marker='^', linewidth=2.2, linestyle='-.', label="mAP@K (%)")
+        
+        plt.xticks(x_pos, x_labels)
+        plt.ylim(0, 105)
+        plt.title(f"Metrics Progression Across Top-K ({', '.join(str(k) for k in k_vals)}) - {self._clean_display_title(test_name)}", fontsize=13)
+        plt.xlabel("Top-K Threshold", fontsize=11)
+        plt.ylabel("Score (%)", fontsize=11)
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend(loc='lower right')
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, f"{test_name}_topk_progression.png"), dpi=150)
         plt.close()
         
     def _plot_distance_density(self, df: pd.DataFrame, test_name: str, out_dir: str = None):
@@ -104,7 +150,7 @@ class ChartGenerator:
         if len(fp_dist) > 0:
             sns.kdeplot(fp_dist, fill=True, color="red", label="False Matches", alpha=0.5)
             
-        plt.title(f"Distance Density Distribution - {test_name}", fontsize=14)
+        plt.title(f"Distance Density Distribution - {self._clean_display_title(test_name)}", fontsize=14)
         plt.xlabel("Distance", fontsize=12)
         plt.ylabel("Density", fontsize=12)
         plt.legend()
@@ -125,7 +171,7 @@ class ChartGenerator:
         
         plt.figure(figsize=(10, 5))
         bars = plt.barh(stages, times, color=sns.color_palette("viridis", len(stages)))
-        plt.title(f"Execution Times by Stage - {test_name}", fontsize=14)
+        plt.title(f"Execution Times by Stage - {self._clean_display_title(test_name)}", fontsize=14)
         plt.xlabel("Time (seconds)", fontsize=12)
         plt.grid(axis='x', linestyle='--', alpha=0.7)
         
@@ -165,13 +211,15 @@ class ChartGenerator:
         ax.plot(angles, values, linewidth=2, linestyle='solid', color='#1f77b4')
         ax.fill(angles, values, '#1f77b4', alpha=0.25)
         
-        plt.title(f"Performance Metrics Radar - {test_name}", size=15, y=1.1)
+        plt.title(f"Performance Metrics Radar - {self._clean_display_title(test_name)}", size=15, y=1.1)
         plt.tight_layout()
         plt.savefig(os.path.join(out_dir, f"{test_name}_metrics_radar.png"), dpi=150)
         plt.close()
 
     def generate_comparative_charts(self, batch_name: str, test_names: list, csv_paths: list, json_paths: list):
         print(f"\n[+] Generating comparative charts for {batch_name}...")
+        display_batch = self._clean_display_title(batch_name)
+        test_names = [self._clean_display_title(n) for n in test_names]
         
         dfs = []
         metas = []
@@ -182,7 +230,9 @@ class ChartGenerator:
                 
         # 1. Comparative CMC Curve
         plt.figure(figsize=(8, 5))
-        ranks = list(range(1, metas[0].get('top_k', 5) + 1))
+        max_top_k = max(m.get('top_k', 5) for m in metas) if metas else 5
+        ranks = list(range(1, max_top_k + 1))
+        marker_sz = 6 if max_top_k <= 10 else (4 if max_top_k <= 20 else 2.5)
         
         for df, name in zip(dfs, test_names):
             cmc_scores = []
@@ -191,12 +241,16 @@ class ChartGenerator:
             for k in ranks:
                 correct_at_k = df[(df['match_rank'] <= k) & (df['is_correct'])].drop_duplicates(subset=['probe_image'])
                 cmc_scores.append((len(correct_at_k) / num_probes * 100) if num_probes > 0 else 0)
-            plt.plot(ranks, cmc_scores, marker='o', linestyle='-', linewidth=2, label=name)
+            plt.plot(ranks, cmc_scores, marker='o', markersize=marker_sz, linestyle='-', linewidth=2, label=name)
             
-        plt.title(f"Comparative CMC Curve - {batch_name}", fontsize=14, pad=20)
-        plt.xlabel("Rank", fontsize=12)
+        plt.title(f"Comparative CMC Curve - {display_batch}", fontsize=14, pad=20)
+        plt.xlabel("Rank (Top-K)", fontsize=12)
         plt.ylabel("Recognition Rate (%)", fontsize=12)
-        plt.xticks(ranks)
+        if max_top_k <= 10:
+            plt.xticks(ranks)
+        else:
+            tick_candidates = sorted(set([1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, max_top_k]))
+            plt.xticks([t for t in tick_candidates if t <= max_top_k])
         plt.ylim(0, 105)
         plt.grid(True, linestyle='--', alpha=0.7)
         plt.legend(loc='upper right', fancybox=True, shadow=True)
@@ -224,7 +278,7 @@ class ChartGenerator:
                 ax.plot(angles, values, linewidth=2, linestyle='solid', label=name)
                 ax.fill(angles, values, alpha=0.1)
                 
-        plt.title(f"Comparative Performance Radar - {batch_name}", size=15, y=1.2)
+        plt.title(f"Comparative Performance Radar - {display_batch}", size=15, y=1.2)
         plt.legend(loc='upper right', fancybox=True, shadow=True)
         plt.tight_layout()
         plt.savefig(os.path.join(self.multiple_pipelines_dir, f"{batch_name}_metrics_radar.png"), dpi=150, bbox_inches='tight')
@@ -241,7 +295,7 @@ class ChartGenerator:
             df_times = pd.DataFrame(time_data)
             plt.figure(figsize=(10, 6))
             sns.barplot(data=df_times, y='Stage', x='Time', hue='Pipeline')
-            plt.title(f"Comparative Execution Times - {batch_name}", fontsize=14, pad=20)
+            plt.title(f"Comparative Execution Times - {display_batch}", fontsize=14, pad=20)
             plt.xlabel("Time (seconds)", fontsize=12)
             plt.grid(axis='x', linestyle='--', alpha=0.7)
             plt.legend(loc='upper right', fancybox=True, shadow=True)
@@ -269,7 +323,7 @@ class ChartGenerator:
                         yticklabels=['Actual Match', 'Actual Mismatch'], ax=axes[i])
             axes[i].set_title(f"{name}", fontsize=12)
             
-        plt.suptitle(f"Comparative Confusion Matrices - {batch_name}", fontsize=14, y=1.02)
+        plt.suptitle(f"Comparative Confusion Matrices - {display_batch}", fontsize=14, y=1.02)
         plt.tight_layout()
         plt.savefig(os.path.join(self.multiple_pipelines_dir, f"{batch_name}_confusion_matrix.png"), dpi=150, bbox_inches='tight')
         plt.close()
@@ -295,7 +349,7 @@ class ChartGenerator:
                 if len(fp_dist) > 0:
                     sns.kdeplot(fp_dist, fill=False, color=dark_c, label=f"False - {name}", linewidth=2)
                 
-        plt.title(f"Comparative Distance Density (Overlaid) - {batch_name}", fontsize=14, pad=20)
+        plt.title(f"Comparative Distance Density (Overlaid) - {display_batch}", fontsize=14, pad=20)
         plt.xlabel("Distance", fontsize=12)
         plt.ylabel("Density", fontsize=12)
         plt.legend(loc='upper right', fancybox=True, shadow=True)
@@ -319,7 +373,7 @@ class ChartGenerator:
             axes[i].set_title(f"{name}", fontsize=12)
             axes[i].legend()
             
-        plt.suptitle(f"Comparative Distance Density (Subplots) - {batch_name}", fontsize=14, y=1.02)
+        plt.suptitle(f"Comparative Distance Density (Subplots) - {display_batch}", fontsize=14, y=1.02)
         plt.tight_layout()
         plt.savefig(os.path.join(self.multiple_pipelines_dir, f"{batch_name}_distance_dist_subplots.png"), dpi=150, bbox_inches='tight')
         plt.close()
@@ -572,3 +626,106 @@ class ChartGenerator:
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight')
         plt.close()
+
+    def generate_reduction_analysis_chart(self, json_paths: list, run_tag: str = "reduction_run", out_dir: str = None) -> str:
+        """
+        Generates a single comparative chart for a Reduction Analysis test run showing
+        Information Retained (%) and Information Lost (%) across all evaluated pipelines (e.g., 10 pipelines).
+        """
+        import re
+        if not json_paths:
+            return ""
+        if out_dir is None:
+            out_dir = self.reduction_dir
+        os.makedirs(out_dir, exist_ok=True)
+
+        records = []
+        for jp in json_paths:
+            if not os.path.exists(jp):
+                continue
+            with open(jp, "r") as f:
+                data = json.load(f)
+            base_name = data.get("base_test_name") or data.get("test_name", os.path.splitext(os.path.basename(jp))[0])
+            base_name = re.sub(r"\s*\(.*\)$", "", str(base_name)).strip()
+            comp = data.get("components", {})
+            reducer_name = comp.get("reducer", "").replace("Reducer", "")
+            extractor_name = comp.get("extractor", "").replace("Extractor", "")
+            label = f"{base_name}\n({extractor_name}+{reducer_name})" if (extractor_name or reducer_name) else base_name
+
+            m = re.search(r"(\d+)", base_name)
+            sort_idx = int(m.group(1)) if m else 999
+
+            records.append({
+                "sort_idx": sort_idx,
+                "base_name": base_name,
+                "label": label,
+                "retained": float(data.get("information_retained_percent", 0.0)),
+                "lost": float(data.get("information_lost_percent", 0.0)),
+            })
+
+        if not records:
+            return ""
+
+        records.sort(key=lambda r: (r["sort_idx"], r["base_name"]))
+
+        labels = [r["label"] for r in records]
+        retained_vals = [r["retained"] for r in records]
+        lost_vals = [r["lost"] for r in records]
+
+        x = np.arange(len(labels))
+        width = 0.38
+
+        fig, ax = plt.subplots(figsize=(max(12, len(labels) * 1.35), 6.5))
+        bars_ret = ax.bar(x - width / 2, retained_vals, width, label="Informação Mantida (%)", color="#2ca02c", edgecolor="black", alpha=0.9)
+        bars_lost = ax.bar(x + width / 2, lost_vals, width, label="Informação Perdida (%)", color="#d62728", edgecolor="black", alpha=0.85)
+
+        for bar in bars_ret:
+            h = bar.get_height()
+            ax.annotate(
+                f"{h:.1f}%",
+                xy=(bar.get_x() + bar.get_width() / 2, h),
+                xytext=(0, 4),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                fontweight="bold",
+                color="#1b691b",
+            )
+
+        for bar in bars_lost:
+            h = bar.get_height()
+            ax.annotate(
+                f"{h:.1f}%",
+                xy=(bar.get_x() + bar.get_width() / 2, h),
+                xytext=(0, 4),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                fontweight="bold",
+                color="#991515",
+            )
+
+        display_dataset = self._clean_display_title(run_tag)
+        ax.set_title(
+            f"Análise de Redução de Dimensionalidade: Informação Mantida vs. Perdida ({display_dataset})",
+            fontsize=14,
+            fontweight="bold",
+            pad=14,
+        )
+        ax.set_ylabel("Porcentagem (%)", fontsize=12)
+        ax.set_xlabel("Pipelines", fontsize=12)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, fontsize=9.5)
+        ax.set_ylim(0, 115)
+        ax.legend(loc="upper right", fontsize=11, frameon=True)
+        ax.grid(axis="y", linestyle="--", alpha=0.7)
+
+        plt.tight_layout()
+        out_path = os.path.join(out_dir, f"{run_tag}_reduction_info_retained_lost.png")
+        plt.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close()
+        print(f"\n[+] Reduction Analysis Chart saved to {out_path}")
+        return out_path
+

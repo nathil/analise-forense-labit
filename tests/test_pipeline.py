@@ -72,3 +72,27 @@ def test_pipeline_runner(mock_pipeline_data):
     with open(out_csv, 'r') as f:
         lines = f.readlines()
         assert len(lines) == 9, "CSV should have 1 header line + 8 data lines after append"
+
+def test_pipeline_runner_multi_topk(mock_pipeline_data, tmp_path):
+    gallery, probe, _ = mock_pipeline_data
+    extractor = MockExtractor()
+    reducer = PCAReducer(n_components=2)
+    clusterer = KMeansClusterer(n_clusters=2)
+    searcher = IndexSearcher()
+
+    runner = PipelineRunner(extractor, reducer, clusterer, searcher)
+    out_dir = str(tmp_path / "multi_k")
+    out = runner.run(
+        gallery,
+        probe,
+        test_name="TestMultiK",
+        output_dir=out_dir,
+        file_exists_action="overwrite",
+        top_k_list=[1, 5, 10, 20, 50]
+    )
+
+    assert "metrics_by_top_k" in out["metrics"]
+    for k in [1, 5, 10, 20, 50]:
+        assert str(k) in out["metrics"]["metrics_by_top_k"]
+        assert os.path.exists(os.path.join(out_dir, f"top_k_{k}", "TestMultiK.json"))
+        assert os.path.exists(os.path.join(out_dir, f"top_k_{k}", "TestMultiK.csv"))

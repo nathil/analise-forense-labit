@@ -1,43 +1,64 @@
-from sklearn.cluster import HDBSCAN
+from sklearn.cluster import HDBSCAN, MiniBatchKMeans
 import numpy as np
 
 from .base import Clusterer
 
 class HDBSCANClusterer(Clusterer):
     """
-    HDBSCAN implementation.
-    Note: HDBSCAN does not have standard cluster centers like KMeans,
-    so we calculate the mean of the points in each cluster as the centroid.
+    HDBSCAN implementation with L2-normalization support for cosine/dot metrics
+    and automatic fallback if high-dimensional density estimation marks all points as noise.
     """
-    def __init__(self, min_cluster_size: int = 5, metric: str = 'euclidean', copy: bool = True):
-        self.min_cluster_size = min_cluster_size
-        self.metric = metric
+    def __init__(self, min_cluster_size: int = 3, metric: str = 'euclidean', copy: bool = True):
+        self.min_cluster_size = max(2, min_cluster_size)
+        self.metric = metric.lower()
         self.copy = copy
-        self.model = HDBSCAN(min_cluster_size=min_cluster_size, metric=metric, copy=copy)
+        # On L2-normalized vectors, Euclidean distance is monotonically equivalent to Cosine/Dot
+        sk_metric = 'euclidean' if self.metric in ['cosine', 'dot', 'euclidean'] else self.metric
+        self.model = HDBSCAN(
+            min_cluster_size=self.min_cluster_size,
+            min_samples=1,
+            metric=sk_metric,
+            cluster_selection_method='eom',
+            copy=copy
+        )
         self._cluster_centers = None
         self.labels_ = None
+
+    def _preprocess(self, vectors: np.ndarray) -> np.ndarray:
+        if self.metric in ['cosine', 'dot']:
+            norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+            norms = np.where(norms > 1e-10, norms, 1.0)
+            return vectors / norms
+        return vectors
         
     def fit(self, vectors: np.ndarray) -> None:
-        self.model.fit(vectors)
+        proc_vectors = self._preprocess(vectors)
+        if len(proc_vectors) < self.min_cluster_size:
+            self.labels_ = np.zeros(len(proc_vectors), dtype=int)
+            self._cluster_centers = self._preprocess(np.mean(proc_vectors, axis=0, keepdims=True))
+            return
+
+        self.model.fit(proc_vectors)
         self.labels_ = self.model.labels_
         
-        # Calculate centroids
-        unique_labels = set(self.labels_)
+        unique_labels = sorted(l for l in set(self.labels_) if l != -1)
         
-        # HDBSCAN uses -1 for noise. We can group noise or ignore it.
-        # Here we include it as a separate cluster or just ignore it for centers.
-        valid_labels = [l for l in unique_labels if l != -1]
-        
-        if not valid_labels:
-            # If everything is noise, just use one center at the mean
-            self._cluster_centers = np.mean(vectors, axis=0, keepdims=True)
+        if (len(unique_labels) < 2 or len(unique_labels) > 10) and len(proc_vectors) >= 4:
+            # Fallback/consolidate to balanced MiniBatchKMeans centroids if HDBSCAN collapses into noise
+            # or fragments the gallery into dozens of tiny micro-clusters
+            k_fallback = min(8, max(2, len(proc_vectors) // 8))
+            km = MiniBatchKMeans(n_clusters=k_fallback, random_state=42)
+            self.labels_ = km.fit_predict(proc_vectors)
+            self._cluster_centers = self._preprocess(km.cluster_centers_)
+        elif not unique_labels:
+            self._cluster_centers = self._preprocess(np.mean(proc_vectors, axis=0, keepdims=True))
         else:
-            n_clusters = max(valid_labels) + 1
-            self._cluster_centers = np.zeros((n_clusters, vectors.shape[1]))
-            for i in valid_labels:
-                cluster_pts = vectors[self.labels_ == i]
+            centers = []
+            for lbl in unique_labels:
+                cluster_pts = proc_vectors[self.labels_ == lbl]
                 if len(cluster_pts) > 0:
-                    self._cluster_centers[i] = np.mean(cluster_pts, axis=0)
+                    centers.append(np.mean(cluster_pts, axis=0))
+            self._cluster_centers = self._preprocess(np.array(centers))
 
     def predict(self, vectors: np.ndarray) -> np.ndarray:
         """
@@ -47,10 +68,12 @@ class HDBSCANClusterer(Clusterer):
         if self._cluster_centers is None:
             raise ValueError("Model is not fitted yet.")
             
-        nn = NearestNeighbors(n_neighbors=1, metric=self.metric)
+        proc_vectors = self._preprocess(vectors)
+        nn_metric = 'cosine' if self.metric in ['cosine', 'dot'] else self.metric
+        nn = NearestNeighbors(n_neighbors=1, metric=nn_metric)
         nn.fit(self._cluster_centers)
         
-        _, indices = nn.kneighbors(vectors)
+        _, indices = nn.kneighbors(proc_vectors)
         return indices.flatten()
         
     @property

@@ -11,7 +11,7 @@ except ImportError:
     print("Please install questionary using 'uv add questionary'")
     sys.exit(1)
 
-from core.data.loader import BivTattDatasetLoader, DatasetSplitter
+from core.data.loader import BivTattDatasetLoader, YOLOv5WeaponDatasetLoader, DatasetSplitter
 from core.runner import PipelineRunner
 from core.reduction_analyzer import ReductionAnalyzerRunner
 
@@ -99,6 +99,21 @@ def is_valid_int(val):
         return "Please enter a valid integer or leave empty."
 
 
+def get_next_test_folder_name(base_dir: str) -> str:
+    """Finds the next sequential test folder name (e.g., 'teste_1', 'teste_2') inside a dataset results folder."""
+    import re
+    if not os.path.exists(base_dir):
+        return "teste_1"
+    max_num = 0
+    for entry in os.listdir(base_dir):
+        full_path = os.path.join(base_dir, entry)
+        if os.path.isdir(full_path):
+            m = re.match(r"^teste[_\s-]*(\d+)$", entry.strip(), re.IGNORECASE)
+            if m:
+                max_num = max(max_num, int(m.group(1)))
+    return f"teste_{max_num + 1}"
+
+
 def run_tui():
     print("=" * 60)
     print(" ForensTatt - Pipeline Runner")
@@ -157,6 +172,7 @@ def run_tui():
         "Select the dataset source:",
         choices=[
             "Kagglehub (mexwell/bivtatt-dataset)",
+            "Kagglehub (raghavnanjappan/weapon-dataset-for-yolov5)",
             "Dummy Dataset (Generated for fast testing)",
             "Local Directory"
         ]
@@ -169,6 +185,8 @@ def run_tui():
     gallery = []
     probe = []
     dataset_full = []
+    is_weapon_yolo = "weapon-dataset-for-yolov5" in dataset_source
+    dataset_slug = "weapon-yolov5" if is_weapon_yolo else ("dummy" if "Dummy" in dataset_source else "bivtatt")
     
     # 2. Resolve and Load Dataset Full Metadata
     if "Dummy" in dataset_source:
@@ -177,27 +195,73 @@ def run_tui():
         dataset_full = g + p
     else:
         if "Local" in dataset_source:
-            dataset_path = questionary.path("Enter path to the local BivTatt directory:").ask()
+            dataset_path = questionary.path("Enter path to the local dataset directory:").ask()
             if not dataset_path: return
+            local_format = questionary.select(
+                "Select the local dataset format:",
+                choices=[
+                    "Auto-detect (BivTatt or YOLOv5 Weapon Dataset)",
+                    "BivTatt Format (images/ + bounding_boxes/ x1 y1 x2 y2)",
+                    "YOLOv5 Format (class_id cx cy w h normalized)"
+                ]
+            ).ask()
+            if not local_format: return
+            if "YOLOv5" in local_format:
+                is_weapon_yolo = True
+            elif "Auto-detect" in local_format:
+                has_bivtatt_boxes = os.path.exists(os.path.join(dataset_path, "bounding_boxes"))
+                is_weapon_yolo = not has_bivtatt_boxes
+            dataset_slug = "weapon-yolov5" if is_weapon_yolo else "bivtatt"
             
         elif "Kagglehub" in dataset_source:
             print("Resolving dataset via Kagglehub...")
             import kagglehub
             os.environ['KAGGLEHUB_CACHE'] = os.path.join(os.getcwd(), 'data', 'kagglehub')
-            dataset_path = kagglehub.dataset_download("mexwell/bivtatt-dataset")
-            if not os.path.exists(os.path.join(dataset_path, "images")):
-                subdirs = [os.path.join(dataset_path, d) for d in os.listdir(dataset_path) 
-                           if os.path.isdir(os.path.join(dataset_path, d))]
-                for subdir in subdirs:
-                    if os.path.exists(os.path.join(subdir, "images")):
-                        dataset_path = subdir
-                        break
+            if is_weapon_yolo:
+                dataset_path = kagglehub.dataset_download("raghavnanjappan/weapon-dataset-for-yolov5")
+            else:
+                dataset_path = kagglehub.dataset_download("mexwell/bivtatt-dataset")
+                if not os.path.exists(os.path.join(dataset_path, "images")):
+                    subdirs = [os.path.join(dataset_path, d) for d in os.listdir(dataset_path) 
+                               if os.path.isdir(os.path.join(dataset_path, d))]
+                    for subdir in subdirs:
+                        if os.path.exists(os.path.join(subdir, "images")):
+                            dataset_path = subdir
+                            break
         
         if dataset_path:
-            loader = BivTattDatasetLoader(dataset_path)
+            if is_weapon_yolo:
+                loader = YOLOv5WeaponDatasetLoader(dataset_path)
+            else:
+                loader = BivTattDatasetLoader(dataset_path)
             dataset_full = loader.load_dataset(start=0, length=None)
         else:
             return
+
+    if is_reduction_analysis:
+        mode_base_dir = os.path.join("results", "reduction-analysis", dataset_slug)
+    elif is_grid_search:
+        mode_base_dir = os.path.join("results", "grid-search", dataset_slug)
+    elif is_single_query:
+        mode_base_dir = os.path.join("results", "query", dataset_slug)
+    else:
+        mode_base_dir = os.path.join("results", "pipelines", dataset_slug)
+
+    default_test_folder = get_next_test_folder_name(mode_base_dir)
+    test_folder_input = questionary.text(
+        f"Enter the test folder name inside '{dataset_slug}/' (leave blank to use: {default_test_folder}):"
+    ).ask()
+    if test_folder_input is None:
+        return
+    test_folder_name = test_folder_input.strip() or default_test_folder
+    safe_folder_tag = test_folder_name.replace(" ", "_")
+    run_tag = f"{dataset_slug}_{safe_folder_tag}"
+
+    pipelines_out_dir = os.path.join("results", "pipelines", dataset_slug, test_folder_name)
+    reduction_out_dir = os.path.join("results", "reduction-analysis", dataset_slug, test_folder_name)
+    grid_out_dir = os.path.join("results", "grid-search", dataset_slug, test_folder_name)
+    query_out_dir = os.path.join("results", "query", dataset_slug, test_folder_name)
+    charts_out_dir = os.path.join("results", "charts", dataset_slug, test_folder_name)
 
     total_items = len(dataset_full)
     print(f"\n[+] Dataset resolved. Total items available: {total_items}")
@@ -230,9 +294,10 @@ def run_tui():
         print("Partition does not have enough gallery/probe splits. Exiting.")
         return
 
-    # 2.5 Single Query Parameters
+    # 2.5 Single Query & Top-K Parameters
     probe_index = None
     top_k = 5
+    top_k_list = [5]
     if is_single_query:
         if len(probe) == 0:
             print("Error: No probe images loaded. Cannot run Single Query.")
@@ -254,9 +319,51 @@ def run_tui():
             if not k_str: return
             try:
                 top_k = int(k_str)
-                if top_k > 0: break
+                if top_k > 0:
+                    top_k_list = [top_k]
+                    break
             except ValueError:
                 print("Invalid input.")
+    elif not is_reduction_analysis:
+        topk_mode = questionary.select(
+            "Select Top-K evaluation configuration:",
+            choices=[
+                "Multi-Top-K Suite (1, 5, 10, 20, 50)",
+                "Default Top-K (5)",
+                "Select specific Top-K values from [1, 5, 10, 20, 50]",
+                "Custom single Top-K value"
+            ]
+        ).ask()
+        if not topk_mode:
+            return
+            
+        if "Multi-Top-K Suite" in topk_mode:
+            top_k_list = [1, 5, 10, 20, 50]
+            top_k = max(top_k_list)
+        elif "Default Top-K" in topk_mode:
+            top_k_list = [5]
+            top_k = 5
+        elif "Select specific" in topk_mode:
+            selected_ks = questionary.checkbox(
+                "Choose which Top-K values to evaluate:",
+                choices=["1", "5", "10", "20", "50"]
+            ).ask()
+            if not selected_ks:
+                return
+            top_k_list = sorted(int(k) for k in selected_ks)
+            top_k = max(top_k_list)
+        else:
+            while True:
+                k_str = questionary.text("Enter custom Top-K value:", default="5").ask()
+                if not k_str:
+                    return
+                try:
+                    top_k = int(k_str)
+                    if top_k > 0:
+                        top_k_list = [top_k]
+                        break
+                except ValueError:
+                    print("Invalid input. Please enter a positive integer.")
 
     # 3. Component Selection
     device = questionary.select("Select computation device:", choices=["cuda", "cpu"]).ask()
@@ -264,28 +371,29 @@ def run_tui():
     
     if is_grid_search:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_name = f"{timestamp}_grid_search"
+        default_name = f"grid_search_{run_tag}_{timestamp}"
         test_name_input = questionary.text(f"Enter a name for this Grid Search run (leave blank to use: {default_name}):").ask()
         if test_name_input is None: return
         test_name = test_name_input.strip() or default_name
 
-        confirm = questionary.confirm(f"Execute Grid Search over all {len(EXTRACTORS)*len(REDUCERS)*len(CLUSTERERS)*len(SEARCHERS)} pipeline combinations?").ask()
+        confirm = questionary.confirm(f"Execute Grid Search over all {len(EXTRACTORS)*len(REDUCERS)*len(CLUSTERERS)*len(SEARCHERS)} pipeline combinations (Top-K: {top_k_list})?").ask()
         if not confirm: return
 
         from core.grid_search import GridSearchRunner
         from core.visualization.chart_generator import ChartGenerator
 
-        chart_gen = ChartGenerator(output_dir="results/charts")
+        chart_gen = ChartGenerator(output_dir=charts_out_dir)
         grid_runner = GridSearchRunner(
             extractors=EXTRACTORS,
             reducers=REDUCERS,
             clusterers=CLUSTERERS,
             searchers=SEARCHERS,
             device=device,
-            top_k=5
+            top_k=top_k,
+            top_k_list=top_k_list
         )
 
-        summary_df, best_pipe = grid_runner.run(gallery, probe, test_name=test_name)
+        summary_df, best_pipe = grid_runner.run(gallery, probe, test_name=test_name, output_dir=grid_out_dir)
         chart_gen.generate_grid_search_charts(test_name, summary_df)
 
         print("\n" + "=" * 60)
@@ -297,8 +405,8 @@ def run_tui():
         print(f"    - Recall:                       {best_pipe['recall']:.4f}")
         print(f"    - F1-Score:                     {best_pipe['f1_score']:.4f}")
         print(f"    - Total Pipeline Time:          {best_pipe['total_time']:.3f}s")
-        print(f"    - Consolidated CSV:             results/grid-search/{test_name}.csv")
-        print(f"    - Analytical Charts:            results/charts/grid-search/")
+        print(f"    - Consolidated CSV:             {grid_out_dir}/{test_name}.csv")
+        print(f"    - Analytical Charts:            {charts_out_dir}/grid-search/")
         print("=" * 60 + "\n")
         return
 
@@ -389,12 +497,13 @@ def run_tui():
                 
     batch_name = None
     if not is_reduction_analysis and len(pipelines_to_run) > 1:
-        default_batch = f"Batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        default_batch = f"Batch_{run_tag}"
         batch_input = questionary.text(f"Enter a name for this comparative batch (leave blank to use: {default_batch}):").ask()
         if batch_input is None: return
-        batch_name = batch_input.strip() or default_batch
+        raw_batch = batch_input.strip() or default_batch
+        batch_name = raw_batch if run_tag in raw_batch else f"{raw_batch}_{run_tag}"
     elif is_single_query and len(pipelines_to_run) == 1:
-        batch_name = pipelines_to_run[0]["test_name"]
+        batch_name = f"{pipelines_to_run[0]['test_name']}_{run_tag}"
 
     # 5. Confirmation
     confirm = questionary.confirm("Execute?").ask()
@@ -407,31 +516,31 @@ def run_tui():
     json_paths = []
     test_names = []
     from core.visualization.chart_generator import ChartGenerator
-    chart_gen = ChartGenerator(output_dir="results/charts")
+    chart_gen = ChartGenerator(output_dir=charts_out_dir)
     
     for i, p_config in enumerate(pipelines_to_run):
         t_name = p_config["test_name"]
         print(f"\n[{i+1}/{len(pipelines_to_run)}] Building components for {t_name}...")
         
-        if p_config["extractor"] == "ResNet50":
-            extractor = EXTRACTORS[p_config["extractor"]](use_l2_norm=False, device=device)
-        else:
-            extractor = EXTRACTORS[p_config["extractor"]](device=device)
+        extractor = EXTRACTORS[p_config["extractor"]](device=device)
         
         red_k = min(128, max(1, len(gallery) - 2))
         if p_config["reducer"] in ["PCA", "SVD"]:
             reducer = REDUCERS[p_config["reducer"]](n_components=red_k)
         elif p_config["reducer"] == "UMAP":
-            reducer = REDUCERS[p_config["reducer"]](n_components=red_k, metric='euclidean', n_neighbors=15)
+            reducer = REDUCERS[p_config["reducer"]](n_components=red_k, metric='cosine', n_neighbors=50, min_dist=0.5)
+        elif p_config["reducer"] == "KNN Graph":
+            reducer = REDUCERS[p_config["reducer"]](n_components=red_k, n_neighbors=30, metric='cosine')
         else:
             reducer = REDUCERS[p_config["reducer"]]()
 
         if is_reduction_analysis:
-            print(f"\n[+] Running Reduction Analysis ({t_name})...")
+            print(f"\n[+] Running Reduction Analysis ({t_name} | {run_tag})...")
             runner = ReductionAnalyzerRunner(extractor, reducer)
-            out = runner.run(dataset_full, test_name=t_name)
+            out = runner.run(dataset_full, test_name=t_name, output_dir=reduction_out_dir, run_tag=run_tag)
             
-            output_json = os.path.join("results/reduction-analysis", f"{t_name}.json")
+            output_json = os.path.join(reduction_out_dir, f"{t_name}_{run_tag}_reduction.json")
+            json_paths.append(output_json)
             print(f"\n[+] Execution finished! Results saved to {output_json}")
             print("-" * 40)
             print(f"Information Retained: {out['information_retained_percent']:.2f}%")
@@ -441,19 +550,21 @@ def run_tui():
             print("-" * 40)
             
         else:
-            if p_config["clusterer"] == "MiniBatchKMeans":
-                n_clusters = max(2, min(8, len(gallery) // 2)) if len(gallery) > 2 else len(gallery)
-                clusterer = CLUSTERERS[p_config["clusterer"]](n_clusters=n_clusters, metric='euclidean')
-            elif p_config["clusterer"] == "HDBSCAN":
-                clusterer = CLUSTERERS[p_config["clusterer"]](min_cluster_size=max(2, min(5, len(gallery)//2)), metric='euclidean')
-            elif p_config["clusterer"] == "Louvain":
-                clusterer = CLUSTERERS[p_config["clusterer"]](n_neighbors=5, metric='cosine')
-    
             searcher = SEARCHERS[p_config["searcher"]]()
+            clust_metric = getattr(searcher, "metric", "euclidean")
+            if p_config["clusterer"] == "MiniBatchKMeans":
+                n_clusters = max(2, min(8, len(gallery) // 4)) if len(gallery) > 4 else max(1, len(gallery))
+                clusterer = CLUSTERERS[p_config["clusterer"]](n_clusters=n_clusters, metric=clust_metric)
+            elif p_config["clusterer"] == "HDBSCAN":
+                clusterer = CLUSTERERS[p_config["clusterer"]](min_cluster_size=max(2, min(4, len(gallery)//4)), metric=clust_metric)
+            elif p_config["clusterer"] == "Louvain":
+                clusterer = CLUSTERERS[p_config["clusterer"]](n_neighbors=min(15, max(2, len(gallery)-1)), metric='cosine')
     
             runner = PipelineRunner(extractor, reducer, clusterer, searcher)
             if is_single_query:
-                print(f"\n[+] Running Single Query pipeline ({t_name})...")
+                import json
+                file_stem = f"{t_name}_{run_tag}_query"
+                print(f"\n[+] Running Single Query pipeline ({t_name} -> {file_stem})...")
                 out = runner.run_single_query(gallery, probe[probe_index], top_k=top_k)
                 
                 j = out["journey"]
@@ -462,7 +573,7 @@ def run_tui():
                 print(f"    -> Raw Feature Vector : Dim {len(v_raw)}, Min: {v_raw.min():.4f}, Max: {v_raw.max():.4f}, Mean: {v_raw.mean():.4f}")
                 print(f"    -> Reduced Vector     : Dim {len(v_red)}, Min: {v_red.min():.4f}, Max: {v_red.max():.4f}, Mean: {v_red.mean():.4f}")
                 
-                journey_path = os.path.join("results/charts/query", f"{batch_name}_{t_name}_journey.png")
+                journey_path = os.path.join(charts_out_dir, "query", f"{file_stem}_journey.png")
                 chart_gen.generate_pipeline_journey_chart(j, journey_path)
                 print(f"    -> Pipeline Journey Chart saved to: {journey_path}")
                 
@@ -470,11 +581,16 @@ def run_tui():
                     query_info = {
                         "query_image": out["query_image"],
                         "query_image_path": out["query_image_path"],
-                        "query_label": out["query_label"]
+                        "query_label": out["query_label"],
+                        "dataset": dataset_slug,
+                        "run_tag": run_tag
                     }
                     pipeline_results_dict = {}
                     
-                pipeline_results_dict[t_name] = {
+                single_pipe_entry = {
+                    "test_name": f"{t_name} ({run_tag})",
+                    "base_test_name": t_name,
+                    "run_tag": run_tag,
                     "matches": out["results"],
                     "vector_stats": {
                         "raw_feature_vector": {
@@ -492,29 +608,58 @@ def run_tui():
                     },
                     "journey_chart_path": journey_path
                 }
-                print(f"    Execution finished for {t_name}. Results captured.")
+                pipeline_results_dict[t_name] = single_pipe_entry
+                
+                os.makedirs(query_out_dir, exist_ok=True)
+                pipe_query_json = os.path.join(query_out_dir, f"{file_stem}.json")
+                with open(pipe_query_json, "w") as f:
+                    json.dump({
+                        "test_name": f"{t_name} ({run_tag})",
+                        "base_test_name": t_name,
+                        "run_tag": run_tag,
+                        "query_info": query_info,
+                        "result": single_pipe_entry
+                    }, f, indent=4)
+                print(f"    Execution finished for {t_name}. Saved to {pipe_query_json}")
                 
             else:
-                print(f"\n[+] Running pipeline ({t_name})...")
-                out_csv = os.path.join("results/pipelines", f"{t_name}.csv")
-                out_json = os.path.join("results/pipelines", f"{t_name}.json")
+                file_stem = f"{t_name}_{run_tag}"
+                print(f"\n[+] Running pipeline ({t_name} -> {file_stem}) with Top-K={top_k_list}...")
+                out_csv = os.path.join(pipelines_out_dir, f"{file_stem}.csv")
+                out_json = os.path.join(pipelines_out_dir, f"{file_stem}.json")
                 
-                out = runner.run(gallery, probe, test_name=t_name)
+                out = runner.run(
+                    gallery,
+                    probe,
+                    test_name=t_name,
+                    output_dir=pipelines_out_dir,
+                    top_k=top_k,
+                    top_k_list=top_k_list,
+                    run_tag=run_tag
+                )
                 
                 print(f"\n[+] Execution finished! Results saved to {out_csv}")
                 print(f"    Timers: {out['timers']}")
+                if len(top_k_list) > 1:
+                    for k_val in top_k_list:
+                        k_perf = out["metrics"]["metrics_by_top_k"][str(k_val)]["performance_metrics"]
+                        print(f"    -> Top-{k_val:<2}: Acc@{k_val}={k_perf[f'top{k_val}_accuracy']*100:.1f}% | Recall={k_perf['recall']*100:.1f}% | mAP={k_perf['mAP']:.4f}")
                 
-                chart_gen.generate_all_charts(out_csv, out_json, t_name)
+                chart_gen.generate_all_charts(out_csv, out_json, file_stem)
                 
                 csv_paths.append(out_csv)
                 json_paths.append(out_json)
-                test_names.append(t_name)
+                test_names.append(f"{t_name} ({run_tag})")
             
     if is_single_query and pipelines_to_run:
         import json
-        unified_json_path = os.path.join("results", "query", f"{batch_name}.json")
+        os.makedirs(query_out_dir, exist_ok=True)
+        unified_stem = batch_name if batch_name.endswith("_query") else f"{batch_name}_query"
+        unified_json_path = os.path.join(query_out_dir, f"{unified_stem}.json")
         with open(unified_json_path, "w") as f:
             json.dump({
+                "test_name": f"{batch_name} ({run_tag})",
+                "run_tag": run_tag,
                 "query_info": query_info,
                 "pipeline_results": pipeline_results_dict
             }, f, indent=4)
@@ -524,6 +669,11 @@ def run_tui():
         chart_gen.generate_single_query_chart(batch_name, query_info, pipeline_results_dict)
         print(f"    Chart saved to {chart_gen.query_dir}/{batch_name}_query_results.png")
             
+    elif is_reduction_analysis and json_paths:
+        chart_gen.generate_reduction_analysis_chart(json_paths, run_tag=run_tag)
+        # Also save a copy right inside the reduction-analysis test folder for quick access
+        chart_gen.generate_reduction_analysis_chart(json_paths, run_tag=run_tag, out_dir=reduction_out_dir)
+
     elif not is_reduction_analysis and len(pipelines_to_run) > 1:
         chart_gen.generate_comparative_charts(batch_name, test_names, csv_paths, json_paths)
 
