@@ -174,7 +174,8 @@ def run_tui():
             "Kagglehub (mexwell/bivtatt-dataset)",
             "Kagglehub (raghavnanjappan/weapon-dataset-for-yolov5)",
             "Dummy Dataset (Generated for fast testing)",
-            "Local Directory"
+            "Local Directory",
+            "Weapon Dataset for YOLOv5 (Kaggle, class split)"
         ]
     ).ask()
     
